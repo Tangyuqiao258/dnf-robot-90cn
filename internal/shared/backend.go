@@ -23,6 +23,7 @@ const (
 	CapabilityGuildInvite        BackendCapability = "guild_invite"
 	CapabilityPartyDebug         BackendCapability = "party_debug"
 	CapabilitySkill              BackendCapability = "skill"
+	CapabilityEmote              BackendCapability = "emote"
 	CapabilityMarket             BackendCapability = "market"
 	CapabilityCleanup            BackendCapability = "cleanup"
 	CapabilityDangerousDelete    BackendCapability = "dangerous_delete"

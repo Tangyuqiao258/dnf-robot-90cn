@@ -113,6 +113,11 @@ type RuntimeConfig struct {
 	AutoTargetOnlineCount           int    `json:"auto_target_online_count"`
 	AutoMoveIntervalMinSec          int    `json:"auto_move_interval_min_sec"`
 	AutoMoveIntervalMaxSec          int    `json:"auto_move_interval_max_sec"`
+	AutoEmote                       bool   `json:"auto_emote"`
+	AutoEmoteIntervalMinSec         int    `json:"auto_emote_interval_min_sec"`
+	AutoEmoteIntervalMaxSec         int    `json:"auto_emote_interval_max_sec"`
+	AutoEmoteIndexMin               int    `json:"auto_emote_index_min"`
+	AutoEmoteIndexMax               int    `json:"auto_emote_index_max"`
 	AutoShoutIntervalMinSec         int    `json:"auto_shout_interval_min_sec"`
 	AutoShoutIntervalMaxSec         int    `json:"auto_shout_interval_max_sec"`
 	AutoStoreProbabilityPercent     int    `json:"auto_store_probability_percent"`

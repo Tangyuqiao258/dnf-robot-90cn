@@ -452,6 +452,50 @@ func (r *RobotRuntime) AutoMail(uid int) robotcap.ActionResult {
 	})
 }
 
+// AutoEmote sets one robot's mood/emotion index. The stored index is a
+// persistent character trait that other players read off the actor row rather
+// than a live broadcast, so the action is one op254 round trip and nothing
+// else: there is no round to drain and no opinion about which index is right,
+// which is why the config only bounds the range and paces the timer.
+//
+// The gates mirror AutoMail, including the party check. A party owns its
+// member's state, and the server answers a mood change with a scene-object
+// rebuild of the acting session, which is not a refresh a follower needs while
+// it is being driven.
+func (r *RobotRuntime) AutoEmote(uid int, emotionIndex uint16) robotcap.ActionResult {
+	return r.run(uid, func() robotcap.ActionResult {
+		if err := r.manager.requireBackendCapability(shared.CapabilityEmote); err != nil {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
+		}
+		st, ok := r.Status(uid)
+		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 || st.PartyActive || r.PartyActive(uid) {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
+		}
+		if st.RobotType == 2 || st.RobotType == 3 || st.StoreDisplayAck {
+			// Never disturb an active stall; the action timer retries later.
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "store_active"}
+		}
+		rc := r.Config()
+		if !rc.AutoEmote {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "disabled"}
+		}
+		emoter, ok := r.manager.actions.(interface {
+			ChangeEmotion(int, uint16) (uint16, error)
+		})
+		if !ok {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "emote_unsupported"}
+		}
+		stored, err := emoter.ChangeEmotion(uid, emotionIndex)
+		if err != nil {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed, Message: err.Error()}
+		}
+		return robotcap.ActionResult{
+			UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
+			Message: fmt.Sprintf("emotion=%d", stored),
+		}
+	})
+}
+
 // AutoServerNotice runs one fleet-paced server-notice action: it prepares the
 // trigger stock in an offline window when the live probe fails, re-logs the
 // robot through the adaptive online gate, then sends the trigger packet and

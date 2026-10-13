@@ -331,6 +331,9 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 	if !m.backendInfo.Supports(shared.CapabilitySystemAnnouncement) {
 		rc.AutoSystemAnnouncement = false
 	}
+	if !m.backendInfo.Supports(shared.CapabilityEmote) {
+		rc.AutoEmote = false
+	}
 }
 
 func (m *RobotManager) publishRobotConfigLocked(path string, base robotconfig.RuntimeConfig, previous *robotConfigSnapshot) {

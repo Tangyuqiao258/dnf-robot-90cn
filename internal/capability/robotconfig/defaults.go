@@ -37,6 +37,7 @@ func Default() RuntimeConfig {
 		ServerNoticeVillage:             -1,
 		ServerNoticeArea:                -1,
 		AutoMoveIntervalMinSec:          6, AutoMoveIntervalMaxSec: 18, AutoShoutIntervalMinSec: 45, AutoShoutIntervalMaxSec: 120,
+		AutoEmote: true, AutoEmoteIntervalMinSec: 180, AutoEmoteIntervalMaxSec: 600, AutoEmoteIndexMin: 1, AutoEmoteIndexMax: 8,
 		AutoStoreProbabilityPercent: 5, AutoStoreIntervalMinSec: 120, AutoStoreIntervalMaxSec: 180, AutoStoreDurationSec: 120, AutoStoreTickSec: 10, AutoStoreMaxPositionTries: 10, AutoStoreFailCooldownSec: 60,
 		AutoGamePortStableSec: 15, AutoGamePortCheckTimeoutMS: 800,
 		SchedulerBadRecoverSec: 60, SchedulerBadFailures: 3, SchedulerMetricsIntervalSec: 10, SchedulerStoreConcurrent: 30, SchedulerOnlineBatchSize: 120, SchedulerOnlineStartRate: 20, SchedulerOnlineFillTimeout: 120,
@@ -277,6 +278,21 @@ func normalizeAutoSchedule(rc *RuntimeConfig) {
 	}
 	if rc.AutoShoutIntervalMaxSec < rc.AutoShoutIntervalMinSec {
 		rc.AutoShoutIntervalMaxSec = rc.AutoShoutIntervalMinSec + 60
+	}
+	if rc.AutoEmoteIntervalMinSec <= 0 {
+		rc.AutoEmoteIntervalMinSec = 180
+	}
+	if rc.AutoEmoteIntervalMaxSec < rc.AutoEmoteIntervalMinSec {
+		rc.AutoEmoteIntervalMaxSec = rc.AutoEmoteIntervalMinSec + 420
+	}
+	// The index range is cosmetic and the server stores whatever it is sent, so
+	// the clamp only has to keep the draw well formed: a floor of 1 keeps the
+	// neutral mood (0) out of the rotation.
+	if rc.AutoEmoteIndexMin < 1 {
+		rc.AutoEmoteIndexMin = 1
+	}
+	if rc.AutoEmoteIndexMax < rc.AutoEmoteIndexMin {
+		rc.AutoEmoteIndexMax = rc.AutoEmoteIndexMin
 	}
 	if rc.AutoTargetOnlineCount < 0 {
 		rc.AutoTargetOnlineCount = 0

@@ -25,6 +25,7 @@ const (
 	CmdMailboxOpen        uint16 = 96
 	CmdChangeLetterStat   uint16 = 134
 	CmdChangeTutorial     uint16 = 143
+	CmdChangeEmotion      uint16 = 254
 	CmdAuctionAverage     uint16 = 182
 	CmdAuctionRegister    uint16 = 183
 	CmdAuctionCancel      uint16 = 184

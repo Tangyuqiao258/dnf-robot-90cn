@@ -50,7 +50,7 @@ func (a *Actor) handleCommand(cmd Command) robotcap.ActionResult {
 		return a.logoutCurrentUID()
 	}
 	switch cmd {
-	case CommandMove, CommandShoutLocal, CommandShoutWorld, CommandStore, CommandServerNotice:
+	case CommandMove, CommandShoutLocal, CommandShoutWorld, CommandStore, CommandServerNotice, CommandEmote:
 		st, _ := a.runtime.Status(uid)
 		if st.PartyActive || a.runtime.PartyActive(uid) {
 			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party active"}
@@ -89,6 +89,12 @@ func (a *Actor) handleCommand(cmd Command) robotcap.ActionResult {
 		// The notice workflow prepares its stock offline and performs its own
 		// confirmed login, mirroring the store workflow's offline cycle.
 		return a.runtime.ForceServerNotice(uid)
+	case CommandEmote:
+		if res, ok := a.ensureOnlineForCommand(); !ok {
+			return res
+		}
+		rc := a.runtime.Config()
+		return a.runtime.AutoEmote(uid, uint16(a.randBetween(rc.AutoEmoteIndexMin, rc.AutoEmoteIndexMax)))
 	}
 	return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateUnknownCommand}
 }
@@ -256,6 +262,22 @@ func (a *Actor) tick(now time.Time) {
 			foundationlog.Robotf("[Actor] mail_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
 		}
 	}
+	if !isStore && a.nextEmoteDue(now, rc) {
+		// The index is drawn here rather than in the runtime so every robot
+		// walks its own sequence instead of sharing one draw per tick.
+		emotionIndex := uint16(a.randBetween(rc.AutoEmoteIndexMin, rc.AutoEmoteIndexMax))
+		var res robotcap.ActionResult
+		a.runBusy("emote", func() {
+			res = a.runtime.AutoEmote(uid, emotionIndex)
+		})
+		// A rejected mood change is ordinary cosmetic business and stays inside
+		// the round, for the same reason the auction and mail rounds log rather
+		// than count: a new feature must not quarantine a healthy robot while
+		// its live behavior is still being watched.
+		if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] emote_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
 	if !isStore && a.nextMoveDue(now, rc) {
 		a.runBusy("move", func() {
 			a.runtime.AutoMove(uid)
@@ -277,6 +299,7 @@ func (a *Actor) clearAutoActionSchedule() {
 	a.nextStore = time.Time{}
 	a.nextAuction = time.Time{}
 	a.nextMail = time.Time{}
+	a.nextEmote = time.Time{}
 	a.nextServerNotice = time.Time{}
 }
 
@@ -286,6 +309,7 @@ func (a *Actor) clearAutoScheduleLocked() {
 	a.nextStore = time.Time{}
 	a.nextAuction = time.Time{}
 	a.nextMail = time.Time{}
+	a.nextEmote = time.Time{}
 	a.nextServerNotice = time.Time{}
 	a.storeUntil = time.Time{}
 }
@@ -367,6 +391,19 @@ func (a *Actor) nextMailDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	return a.randomizedDue(&a.nextMail, now, rc.MailIntervalMinSec, rc.MailIntervalMaxSec)
+}
+
+// nextEmoteDue paces one robot's mood change. It is the slowest of the social
+// timers on purpose: the stored mood is a persistent trait other players read
+// off the actor row, so a robot that flips it often reads as glitchy rather
+// than lively.
+func (a *Actor) nextEmoteDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
+	if !rc.AutoEmote {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.randomizedDue(&a.nextEmote, now, rc.AutoEmoteIntervalMinSec, rc.AutoEmoteIntervalMaxSec)
 }
 
 // nextServerNoticeDue is the per-robot timer. The fleet-wide gap and hourly

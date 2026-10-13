@@ -207,6 +207,34 @@ func (t *ActionTransport) PartyFollowTarget(uid int) (shared.PartyFollowTarget, 
 	return provider.PartyFollowTarget()
 }
 
+// emoteActionTimeout bounds one mood change. The command is a single request
+// answered from the same write path the other opcodes use, so the window only
+// has to cover a round trip; the scene refresh the server appends afterwards is
+// not waited for.
+const emoteActionTimeout = 10 * time.Second
+
+// ChangeEmotion sets one session's mood/emotion index and reports the index the
+// server stored. A session that is not on the 90CN adapter has no such method,
+// so the scheduler can offer every backend the same schedule.
+func (t *ActionTransport) ChangeEmotion(uid int, emotionIndex uint16) (uint16, error) {
+	if t == nil {
+		return 0, fmt.Errorf("90CN emotion change needs a transport")
+	}
+	session, err := t.session(uid)
+	if err != nil {
+		return 0, err
+	}
+	emoter, ok := session.(interface {
+		ChangeEmotion(context.Context, uint16) (uint16, error)
+	})
+	if !ok {
+		return 0, fmt.Errorf("90CN session does not expose the emotion protocol")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), emoteActionTimeout)
+	defer cancel()
+	return emoter.ChangeEmotion(ctx, emotionIndex)
+}
+
 func (t *ActionTransport) MoveTown(ctx context.Context, command shared.RuntimeMoveCommand) error {
 	session, err := t.session(command.UID)
 	if err != nil {

@@ -26,6 +26,7 @@ type RobotRuntime interface {
 	AutoStore(uid int, shouldStop func() bool) robotcap.ActionResult
 	AutoAuction(uid int) robotcap.ActionResult
 	AutoMail(uid int) robotcap.ActionResult
+	AutoEmote(uid int, emotionIndex uint16) robotcap.ActionResult
 	AutoServerNotice(uid int, shouldStop func() bool) robotcap.ActionResult
 	ForceServerNotice(uid int) robotcap.ActionResult
 	ExpireStore(uid int) robotcap.ActionResult
@@ -46,6 +47,7 @@ const (
 	CommandShoutWorld
 	CommandStore
 	CommandServerNotice
+	CommandEmote
 	CommandOnline
 	CommandLogout
 )

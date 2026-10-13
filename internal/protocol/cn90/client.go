@@ -151,6 +151,12 @@ func (c *Client) SetUserPosition(ctx context.Context, x, y int16, movementCode b
 	return c.send(ctx, CmdSetUserPosition, SetUserPositionBody(x, y, movementCode, opaqueScaled))
 }
 
+// ChangeEmotion sets the character's mood/emotion index. The server persists
+// it and answers on the same opcode.
+func (c *Client) ChangeEmotion(ctx context.Context, emotionIndex uint16) error {
+	return c.send(ctx, CmdChangeEmotion, ChangeEmotionBody(emotionIndex))
+}
+
 // TownSceneReady sends the legacy type1345 u32(2) acknowledgement the live
 // client emits right after the first typed op24. The server uses it to release
 // the deferred scene tail and the HUD gauges.
