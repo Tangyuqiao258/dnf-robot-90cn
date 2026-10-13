@@ -181,6 +181,9 @@ func ComposeRuntime(ctx context.Context, opts RuntimeComposeOptions) (RuntimeBun
 		_ = loadouts.Close()
 		return bundle, fmt.Errorf("transport: %w", err)
 	}
+	// The auction round recomputes the same stock plan the offline stage wrote
+	// into the bag, so it needs the catalog the seeder used.
+	transport.stackables = catalogs.Stackable
 	logStartupStage("transport")
 	address := net.JoinHostPort(opts.ConnectIP, fmt.Sprint(gamePort))
 	names := catalog.NameTemplates(opts.Paths.Templates)

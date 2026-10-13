@@ -21,6 +21,10 @@ type ActionTransport struct {
 	sessions      map[int]shared.RobotSession
 	status        map[int]shared.RuntimeStatus
 	locationKnown map[int]bool
+	// stackables is the stockable catalog shared with the offline stage. The
+	// assembly writes it once before the runtime starts and only reads it
+	// afterwards, so it carries no lock of its own.
+	stackables []shared.EquipmentCatalogItem
 }
 
 func NewActionTransport(factory ...shared.SessionFactory) *ActionTransport {

@@ -24,7 +24,7 @@ func Info() shared.BackendInfo {
 	capabilities[shared.CapabilityServerNotice] = shared.CapabilityStatus{Reason: "the DNF90 server implements no notice broadcast: op477 has no handler and op503 is a passive client report; no admin broadcast route exists"}
 	capabilities[shared.CapabilityServiceControl] = shared.CapabilityStatus{Reason: "90CN service control is not implemented"}
 	capabilities[shared.CapabilityDungeonMove] = shared.CapabilityStatus{Reason: "90CN dungeon movement is not implemented"}
-	capabilities[shared.CapabilityMarket] = shared.CapabilityStatus{Reason: "the server implements a full item auction (op182-190, op334: register, cancel, bid, piece buy, search, mine, history, average) and no gold-consignment route; the robot adapter has no auction transport"}
+	capabilities[shared.CapabilityMarket] = shared.CapabilityStatus{Enabled: true, Reason: "buyout-only listings (op183 register with the no-start-price sentinel) placed from the offline-seeded bag stock, and purchases of player listings under the price model (op186/op187 browse, op334 piece buy); a character's own listings are read back with op188"}
 	return shared.BackendInfo{
 		ID: BackendID, DisplayName: "90CN", SupportedOS: []string{"linux", "windows"}, Selectable: true,
 		Capabilities: capabilities, MaxOnline: 10000,

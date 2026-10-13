@@ -8,13 +8,14 @@ import (
 )
 
 type partyWaitRuntime struct {
-	config  robotconfig.RuntimeConfig
-	status  robotcap.RuntimeStatus
-	party   bool
-	moves   int
-	shouts  int
-	stores  int
-	expires int
+	auctions int
+	config   robotconfig.RuntimeConfig
+	status   robotcap.RuntimeStatus
+	party    bool
+	moves    int
+	shouts   int
+	stores   int
+	expires  int
 }
 
 func (r *partyWaitRuntime) Config() robotconfig.RuntimeConfig { return r.config }
@@ -63,6 +64,10 @@ func (r *partyWaitRuntime) AutoShout(uid int, _ bool, _ string) robotcap.ActionR
 func (r *partyWaitRuntime) AutoStore(uid int, _ func() bool) robotcap.ActionResult {
 	r.stores++
 	return robotcap.ActionResult{UID: uid, OK: true}
+}
+func (r *partyWaitRuntime) AutoAuction(uid int) robotcap.ActionResult {
+	r.auctions++
+	return robotcap.ActionResult{UID: uid, OK: true, State: robotcap.ActionStateSent}
 }
 func (r *partyWaitRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid, OK: true, State: robotcap.ActionStateNoticed}

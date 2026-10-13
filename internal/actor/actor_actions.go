@@ -228,6 +228,20 @@ func (a *Actor) tick(now time.Time) {
 			return
 		}
 	}
+	if !isStore && a.nextAuctionDue(now, rc) {
+		var res robotcap.ActionResult
+		a.runBusy("auction", func() {
+			res = a.runtime.AutoAuction(uid)
+		})
+		// A refused listing or a listing that was already sold is ordinary
+		// auction business and stays inside the round, so a failure here means
+		// the session itself could not be used. It is logged rather than
+		// counted: a new feature must not quarantine an otherwise healthy robot
+		// while its live behavior is still being watched.
+		if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] auction_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
 	if !isStore && a.nextMoveDue(now, rc) {
 		a.runBusy("move", func() {
 			a.runtime.AutoMove(uid)
@@ -247,6 +261,7 @@ func (a *Actor) clearAutoActionSchedule() {
 	a.nextMove = time.Time{}
 	a.nextShout = time.Time{}
 	a.nextStore = time.Time{}
+	a.nextAuction = time.Time{}
 	a.nextServerNotice = time.Time{}
 }
 
@@ -254,6 +269,7 @@ func (a *Actor) clearAutoScheduleLocked() {
 	a.nextMove = time.Time{}
 	a.nextShout = time.Time{}
 	a.nextStore = time.Time{}
+	a.nextAuction = time.Time{}
 	a.nextServerNotice = time.Time{}
 	a.storeUntil = time.Time{}
 }
@@ -310,6 +326,18 @@ func (a *Actor) nextStoreDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	return a.randomizedDue(&a.nextStore, now, rc.AutoStoreIntervalMinSec, rc.AutoStoreIntervalMaxSec)
+}
+
+// nextAuctionDue paces one robot's auction round. The interval is measured in
+// minutes because a listing lives for hours: the board only needs a robot to
+// keep its few slots filled, not to poll them.
+func (a *Actor) nextAuctionDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
+	if !rc.AuctionEnabled {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.randomizedDue(&a.nextAuction, now, rc.AuctionIntervalMinSec, rc.AuctionIntervalMaxSec)
 }
 
 // nextServerNoticeDue is the per-robot timer. The fleet-wide gap and hourly

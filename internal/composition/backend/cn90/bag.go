@@ -40,6 +40,10 @@ const (
 	// for a piece purchase to divide evenly.
 	cn90AuctionStockMaxCount = 200
 	cn90AuctionStockMinCount = 20
+	// cn90AuctionStockDefaultStacks is the stock depth used when the runtime
+	// config carries none. The seeder and the live round must agree on it,
+	// because the plan is a pure function of the character id and this count.
+	cn90AuctionStockDefaultStacks = 6
 	// cn90MainInventoryList is the server's MainInventoryListType: the only
 	// personal list the auction register gate accepts beside the avatar list.
 	cn90MainInventoryList = 0
@@ -240,7 +244,7 @@ func (a *SQLiteLoadoutApplier) applyRobotAuctionStock(ctx context.Context, db *s
 	}
 	stacks := a.Config.AuctionStockStacks
 	if stacks <= 0 {
-		stacks = 6
+		stacks = cn90AuctionStockDefaultStacks
 	}
 	plan := cn90AuctionStockPlan(a.Stackables, characterID, stacks)
 	held, err := a.currentAuctionStock(ctx, db, characterID)

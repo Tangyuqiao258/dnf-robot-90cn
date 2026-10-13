@@ -74,6 +74,9 @@ func (r *reconnectRuntime) AutoShout(uid int, _ bool, _ string) robotcap.ActionR
 func (r *reconnectRuntime) AutoStore(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }
+func (r *reconnectRuntime) AutoAuction(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
 func (r *reconnectRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }

@@ -26,6 +26,7 @@ type Actor struct {
 	nextMove          time.Time
 	nextShout         time.Time
 	nextStore         time.Time
+	nextAuction       time.Time
 	nextServerNotice  time.Time
 	storeUntil        time.Time
 	lastOnlineTry     time.Time

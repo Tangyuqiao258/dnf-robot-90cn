@@ -56,6 +56,9 @@ type RuntimeConfig struct {
 	// robot logs in: the server's register gate reads the listed item from the
 	// character's bound inventory record and its buy path debits the character's
 	// gold stat, so neither can be produced from the session alone.
+	//
+	// AuctionListPerRobot is how many live listings one character keeps: zero
+	// leaves the character as a pure buyer, and the register gate caps it at ten.
 	AuctionEnabled                  bool   `json:"auction_enabled"`
 	AuctionStockStacks              int    `json:"auction_stock_stacks"`
 	AuctionStockGold                int    `json:"auction_stock_gold"`

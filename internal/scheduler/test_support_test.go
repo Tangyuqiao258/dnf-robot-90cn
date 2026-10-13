@@ -67,6 +67,9 @@ func (actorTestRuntime) AutoShout(uid int, _ bool, _ string) robotcap.ActionResu
 func (actorTestRuntime) AutoStore(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }
+func (actorTestRuntime) AutoAuction(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
 func (actorTestRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }
