@@ -166,6 +166,7 @@ func ComposeRuntime(ctx context.Context, opts RuntimeComposeOptions) (RuntimeBun
 	logStartupStage("loadout_applier")
 	loadouts.LevelThresholds = catalogs.LevelThresholds
 	loadouts.QuestGates = questGates
+	loadouts.Stackables = catalogs.Stackable
 	replaced, err := loadouts.ReconcileRobotLoadouts(ctx, prefix, inventory.Robots)
 	if err != nil {
 		_ = loadouts.Close()

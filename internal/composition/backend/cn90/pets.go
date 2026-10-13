@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"hash/fnv"
 	"strconv"
 	"strings"
 	"time"
@@ -262,7 +261,5 @@ func buildPetCreatureEquipEntry(slot int, itemID int, serial uint32) []byte {
 // cn90DeterministicPercent hashes a key into 0..99 so probability decisions are
 // stable across restarts for one account or character.
 func cn90DeterministicPercent(seed string) int {
-	hasher := fnv.New32a()
-	_, _ = hasher.Write([]byte(seed))
-	return int(hasher.Sum32() % 100)
+	return int(cn90DeterministicValue(seed) % 100)
 }

@@ -56,16 +56,20 @@ type SQLiteLoadoutApplier struct {
 	Config          robotconfig.RuntimeConfig
 	LevelThresholds []int
 	Equipment       []shared.EquipmentCatalogItem
-	QuestGates      capabilitypvf.QuestGates
-	PVFPath         string
-	RandIntn        func(int) int
-	db              *sql.DB
-	archive         *cn90PVFArchive
-	archiveTried    bool
-	nativeTypes     map[string]equipmentTypeInfo
-	executorMu      lockhub.Locker
-	executor        *persistenceExecutor
-	closed          bool
+	// Stackables is the projected stackable catalog. The auction stock stage
+	// resolves its pool ids through it for the item's PVF path, attach type and
+	// stack limit.
+	Stackables   []shared.EquipmentCatalogItem
+	QuestGates   capabilitypvf.QuestGates
+	PVFPath      string
+	RandIntn     func(int) int
+	db           *sql.DB
+	archive      *cn90PVFArchive
+	archiveTried bool
+	nativeTypes  map[string]equipmentTypeInfo
+	executorMu   lockhub.Locker
+	executor     *persistenceExecutor
+	closed       bool
 }
 
 func NewSQLiteLoadoutApplier(ctx context.Context, databasePath string, config robotconfig.RuntimeConfig, equipment []shared.EquipmentCatalogItem, pvfPath string, randIntn func(int) int) (*SQLiteLoadoutApplier, error) {
@@ -183,13 +187,18 @@ func (a *SQLiteLoadoutApplier) ReconcileRobotLoadouts(ctx context.Context, accou
 		if err != nil {
 			return replaced, err
 		}
-		if !needs {
-			continue
+		if needs {
+			if err := a.applyAccountLoadout(ctx, account, info); err != nil {
+				return replaced, fmt.Errorf("reconcile 90CN loadout uid=%d: %w", info.UID, err)
+			}
+			replaced++
 		}
-		if err := a.applyAccountLoadout(ctx, account, info); err != nil {
-			return replaced, fmt.Errorf("reconcile 90CN loadout uid=%d: %w", info.UID, err)
+		// The auction stock stage keeps its own gate: the equipment stage
+		// re-rolls a robot's gear when it runs, so a bag that lost stacks to a
+		// sale must not trigger it.
+		if err := a.reconcileRobotAuctionStock(ctx, account); err != nil {
+			return replaced, fmt.Errorf("reconcile 90CN auction stock uid=%d: %w", info.UID, err)
 		}
-		replaced++
 	}
 	return replaced, nil
 }
@@ -357,7 +366,10 @@ func (a *SQLiteLoadoutApplier) applyAccountLoadout(ctx context.Context, account 
 		if err := a.applyRobotLoadout(jobCtx, db, row.characterID, row.job, row.level); err != nil {
 			return err
 		}
-		return a.applyRobotPet(jobCtx, db, row.characterID)
+		if err := a.applyRobotPet(jobCtx, db, row.characterID); err != nil {
+			return err
+		}
+		return a.applyRobotAuctionStock(jobCtx, db, row.characterID)
 	})
 }
 

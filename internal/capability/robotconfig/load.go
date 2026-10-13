@@ -94,6 +94,17 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.MinPetArtifactSlots = dec.Int("pet", "min_pet_artifact_slots", rc.MinPetArtifactSlots)
 	rc.MaxPetArtifactSlots = dec.Int("pet", "max_pet_artifact_slots", rc.MaxPetArtifactSlots)
 
+	rc.AuctionEnabled = dec.Bool("auction", "auction_enabled", rc.AuctionEnabled)
+	rc.AuctionStockStacks = dec.Int("auction", "auction_stock_stacks", rc.AuctionStockStacks)
+	rc.AuctionStockGold = dec.Int("auction", "auction_stock_gold", rc.AuctionStockGold)
+	rc.AuctionListPerRobot = dec.Int("auction", "auction_list_per_robot", rc.AuctionListPerRobot)
+	rc.AuctionListUnitPercent = dec.Int("auction", "auction_list_unit_percent", rc.AuctionListUnitPercent)
+	rc.AuctionBuyEnabled = dec.Bool("auction", "auction_buy_enabled", rc.AuctionBuyEnabled)
+	rc.AuctionBuyUnitPercent = dec.Int("auction", "auction_buy_unit_percent", rc.AuctionBuyUnitPercent)
+	rc.AuctionBuyMaxTotal = dec.Int("auction", "auction_buy_max_total", rc.AuctionBuyMaxTotal)
+	rc.AuctionIntervalMinSec = dec.Int("auction", "auction_interval_min_sec", rc.AuctionIntervalMinSec)
+	rc.AuctionIntervalMaxSec = dec.Int("auction", "auction_interval_max_sec", rc.AuctionIntervalMaxSec)
+
 	rc.StoreEquipmentPriceMin = dec.Int("store", "store_equipment_price_min", rc.StoreEquipmentPriceMin)
 	rc.StoreEquipmentPriceMax = dec.Int("store", "store_equipment_price_max", rc.StoreEquipmentPriceMax)
 	rc.StoreEquipmentLevelWeight = dec.Int("store", "store_equipment_level_weight", rc.StoreEquipmentLevelWeight)

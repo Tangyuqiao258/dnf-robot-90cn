@@ -18,6 +18,8 @@ func newPetTestDatabase(t *testing.T) string {
 	defer db.Close()
 	_, err := db.Exec(`
 DROP TABLE IF EXISTS dnf_inventory_items;
+DROP TABLE IF EXISTS dnf_inventory_item_extra;
+DROP TABLE IF EXISTS dnf_inventories;
 DROP TABLE IF EXISTS dnf_pet_entries;
 CREATE TABLE dnf_inventories(character_id TEXT PRIMARY KEY, updated_at TEXT);
 CREATE TABLE dnf_inventory_items(character_id TEXT NOT NULL, collection_name TEXT NOT NULL, entry_key TEXT NOT NULL, item_id BIGINT NOT NULL DEFAULT 0, item_count BIGINT NOT NULL DEFAULT 0, bind_flag TINYINT DEFAULT 0, expire_at TEXT, raw_entry BLOB, PRIMARY KEY (character_id, collection_name, entry_key));

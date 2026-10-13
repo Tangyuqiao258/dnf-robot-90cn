@@ -16,16 +16,18 @@ func newEquipmentTestDatabase(t *testing.T) string {
 	db := openPurgeTestDatabase(t, path)
 	defer db.Close()
 	_, err := db.Exec(`
-CREATE TABLE dnf_characters(character_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, slot INT NOT NULL DEFAULT 0, name TEXT NOT NULL DEFAULT '', job TEXT NOT NULL DEFAULT '', level INT NOT NULL DEFAULT 0, grow_type INT NOT NULL DEFAULT 0, delete_flag INT NOT NULL DEFAULT 0, town_id INT NOT NULL DEFAULT 38, area_id INT NOT NULL DEFAULT 1, pos_x INT NOT NULL DEFAULT 450, pos_y INT NOT NULL DEFAULT 234, tutorial_completed INT NOT NULL DEFAULT 0, exp BIGINT NOT NULL DEFAULT 0, updated_at TEXT);
+CREATE TABLE dnf_characters(character_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, slot INT NOT NULL DEFAULT 0, name TEXT NOT NULL DEFAULT '', job TEXT NOT NULL DEFAULT '', level INT NOT NULL DEFAULT 0, grow_type INT NOT NULL DEFAULT 0, delete_flag INT NOT NULL DEFAULT 0, town_id INT NOT NULL DEFAULT 38, area_id INT NOT NULL DEFAULT 1, pos_x INT NOT NULL DEFAULT 450, pos_y INT NOT NULL DEFAULT 234, tutorial_completed INT NOT NULL DEFAULT 0, exp BIGINT NOT NULL DEFAULT 0, gold BIGINT NOT NULL DEFAULT 0, updated_at TEXT);
 CREATE TABLE dnf_character_stats(character_id TEXT, stat_key TEXT, stat_value BIGINT DEFAULT 0, PRIMARY KEY (character_id, stat_key));
 CREATE TABLE dnf_character_locations(character_id TEXT PRIMARY KEY, channel_id INT DEFAULT 0, town_id BIGINT DEFAULT 0, dungeon_id BIGINT DEFAULT 0, room_id TEXT DEFAULT '');
-CREATE TABLE dnf_inventory_items(character_id TEXT, entry_key TEXT, item_id INT);
 CREATE TABLE dnf_pet_entries(character_id TEXT);
 CREATE TABLE dnf_quest_states(character_id TEXT, state_group TEXT, quest_id BIGINT);
 CREATE TABLE dnf_skill_states(character_id TEXT, skill_id BIGINT);
 CREATE TABLE dnf_equipments(character_id TEXT PRIMARY KEY, updated_at TEXT);
 CREATE TABLE dnf_equipment_entries(character_id TEXT NOT NULL, entry_key TEXT NOT NULL, slot_index SMALLINT NOT NULL DEFAULT 0, item_id BIGINT NOT NULL DEFAULT 0, bind_flag TINYINT DEFAULT 0, expire_at TEXT, raw_entry BLOB, PRIMARY KEY (character_id, entry_key));
 CREATE TABLE dnf_equipment_entry_extra(character_id TEXT NOT NULL, entry_key TEXT NOT NULL, extra_key TEXT NOT NULL, extra_value TEXT NOT NULL, PRIMARY KEY (character_id, entry_key, extra_key));
+CREATE TABLE dnf_inventories(character_id TEXT PRIMARY KEY, updated_at TEXT);
+CREATE TABLE dnf_inventory_items(character_id TEXT NOT NULL, collection_name TEXT NOT NULL, entry_key TEXT NOT NULL, item_id BIGINT NOT NULL DEFAULT 0, item_count BIGINT NOT NULL DEFAULT 0, bind_flag TINYINT NOT NULL DEFAULT 0, expire_at TEXT, raw_entry BLOB, PRIMARY KEY (character_id, collection_name, entry_key));
+CREATE TABLE dnf_inventory_item_extra(character_id TEXT NOT NULL, collection_name TEXT NOT NULL, entry_key TEXT NOT NULL, extra_key TEXT NOT NULL, extra_value TEXT NOT NULL, PRIMARY KEY (character_id, collection_name, entry_key, extra_key));
 INSERT INTO dnf_characters(character_id,account_id,slot,name,job,level,delete_flag,tutorial_completed) VALUES ('9','robot17000009',0,'测试者','2',70,0,1);`)
 	if err != nil {
 		t.Fatal(err)

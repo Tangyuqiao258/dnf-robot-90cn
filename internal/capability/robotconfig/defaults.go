@@ -21,7 +21,10 @@ func Default() RuntimeConfig {
 		StoreEquipmentLevelWeight: 35, StoreEquipmentRarityWeight: 40, StoreEquipmentIntensifyWeight: 25,
 		StoreConfirmTimeoutSec:   30,
 		StoreEnchantRatioPercent: 30,
-		FollowRadiusX:            120, FollowRadiusY: 30, ShoutDelayMS: 1000, ShoutSendEnabled: true,
+		AuctionEnabled:           true, AuctionStockStacks: 6, AuctionStockGold: 2000000, AuctionListPerRobot: 3,
+		AuctionListUnitPercent: 130, AuctionBuyEnabled: true, AuctionBuyUnitPercent: 100, AuctionBuyMaxTotal: 500000,
+		AuctionIntervalMinSec: 300, AuctionIntervalMaxSec: 900,
+		FollowRadiusX: 120, FollowRadiusY: 30, ShoutDelayMS: 1000, ShoutSendEnabled: true,
 		AutoActions: true, AutoMailNotify: true, AutoPartyAccept: true, AutoSystemAnnouncement: true, AutoTargetOnlineCount: 20,
 		AutoServerNotice:                false,
 		ServerNoticeRobotIntervalMinSec: 900,
@@ -64,7 +67,65 @@ func Normalize(rc *RuntimeConfig) {
 	normalizeSchedulerDefaults(rc)
 	normalizeSystemDefaults(rc)
 	normalizeStoreEconomy(rc)
+	normalizeAuction(rc)
 	normalizeSpawnDefaults(rc)
+}
+
+// Auction limits following the DNF90 auction owner: one character keeps at most
+// ten active listings, and the stock pool holds at most twelve distinct stacks.
+const (
+	auctionMaxListingsPerCharacter = 10
+	auctionStockStackLimit         = 12
+)
+
+func normalizeAuction(rc *RuntimeConfig) {
+	if rc.AuctionStockStacks <= 0 {
+		rc.AuctionStockStacks = 6
+	}
+	if rc.AuctionStockStacks > auctionStockStackLimit {
+		rc.AuctionStockStacks = auctionStockStackLimit
+	}
+	if rc.AuctionStockGold < 0 {
+		rc.AuctionStockGold = 0
+	}
+	if rc.AuctionStockGold > 100000000 {
+		rc.AuctionStockGold = 100000000
+	}
+	if rc.AuctionListPerRobot < 0 {
+		rc.AuctionListPerRobot = 0
+	}
+	// The server refuses the eleventh active listing of one character, so a
+	// higher value would only burn register attempts.
+	if rc.AuctionListPerRobot > auctionMaxListingsPerCharacter {
+		rc.AuctionListPerRobot = auctionMaxListingsPerCharacter
+	}
+	if rc.AuctionListUnitPercent < 100 {
+		rc.AuctionListUnitPercent = 100
+	}
+	if rc.AuctionListUnitPercent > 1000 {
+		rc.AuctionListUnitPercent = 1000
+	}
+	if rc.AuctionBuyUnitPercent <= 0 {
+		rc.AuctionBuyUnitPercent = 100
+	}
+	if rc.AuctionBuyUnitPercent > 1000 {
+		rc.AuctionBuyUnitPercent = 1000
+	}
+	if rc.AuctionBuyMaxTotal < 0 {
+		rc.AuctionBuyMaxTotal = 0
+	}
+	if rc.AuctionBuyMaxTotal > 400000000 {
+		rc.AuctionBuyMaxTotal = 400000000
+	}
+	if rc.AuctionIntervalMinSec <= 0 {
+		rc.AuctionIntervalMinSec = 300
+	}
+	if rc.AuctionIntervalMaxSec <= 0 {
+		rc.AuctionIntervalMaxSec = 900
+	}
+	if rc.AuctionIntervalMaxSec < rc.AuctionIntervalMinSec {
+		rc.AuctionIntervalMinSec, rc.AuctionIntervalMaxSec = rc.AuctionIntervalMaxSec, rc.AuctionIntervalMinSec
+	}
 }
 
 func normalizeOnlineCapacity(rc *RuntimeConfig) {

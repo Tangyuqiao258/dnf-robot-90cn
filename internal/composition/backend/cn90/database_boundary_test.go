@@ -16,7 +16,7 @@ func TestSimulatorDatabaseAccessIsIsolatedToPersistenceAdapter(t *testing.T) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
 			continue
 		}
-		if entry.Name() == "loadout.go" || entry.Name() == "persistence_inspector.go" || entry.Name() == "startup_inventory.go" || entry.Name() == "growth.go" || entry.Name() == "quests.go" || entry.Name() == "purge.go" || entry.Name() == "population.go" || entry.Name() == "descriptor.go" || entry.Name() == "runtime_assembly.go" || entry.Name() == "instance.go" || entry.Name() == "dnf_schema.go" || entry.Name() == "equipment.go" || entry.Name() == "pets.go" || entry.Name() == "follow_account.go" || entry.Name() == "expert_job.go" || entry.Name() == "expert_job_profession.go" || entry.Name() == "spawn_redistribute.go" || entry.Name() == "server_notice_stock.go" {
+		if entry.Name() == "loadout.go" || entry.Name() == "persistence_inspector.go" || entry.Name() == "startup_inventory.go" || entry.Name() == "growth.go" || entry.Name() == "quests.go" || entry.Name() == "purge.go" || entry.Name() == "population.go" || entry.Name() == "descriptor.go" || entry.Name() == "runtime_assembly.go" || entry.Name() == "instance.go" || entry.Name() == "dnf_schema.go" || entry.Name() == "equipment.go" || entry.Name() == "pets.go" || entry.Name() == "bag.go" || entry.Name() == "follow_account.go" || entry.Name() == "expert_job.go" || entry.Name() == "expert_job_profession.go" || entry.Name() == "spawn_redistribute.go" || entry.Name() == "server_notice_stock.go" {
 			// runtime_assembly.go owns the database path derivation and the
 			// startup inventory composition; growth.go reconciles the persisted
 			// transfer/awakening state after that scan; quests.go seeds the
