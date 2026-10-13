@@ -45,6 +45,19 @@ func auctionTestListingAnswer(rows ...[]byte) []byte {
 	return answer
 }
 
+// auctionTestBoardAnswer builds a search response for a board whose total row
+// count is larger than the page it carries: the server reports the whole
+// filtered board in the header and sends one page of rows behind it.
+func auctionTestBoardAnswer(total int, rows ...[]byte) []byte {
+	answer := []byte{1, 0}
+	answer = binary.LittleEndian.AppendUint32(answer, uint32(total))
+	answer = binary.LittleEndian.AppendUint16(answer, uint16(len(rows)))
+	for _, row := range rows {
+		answer = append(answer, row...)
+	}
+	return answer
+}
+
 // auctionTestMineRow builds one own-listing row: the compact item row at +30.
 func auctionTestMineRow(itemID, count uint32) []byte {
 	row := make([]byte, 151)
@@ -302,6 +315,70 @@ func TestAuctionRoundHonorsTheBuyBudget(t *testing.T) {
 	}
 	if bought != 1 {
 		t.Errorf("bought = %d, want the single affordable listing", bought)
+	}
+}
+
+// TestAuctionRoundReadsTheTailOfALargeBoard pins the paging. The server sorts
+// the board oldest first and answers one page at a time, so a listing a player
+// has just put up sits on the last page: a round that read only the first page
+// would never see it, however cheap it was.
+func TestAuctionRoundReadsTheTailOfALargeBoard(t *testing.T) {
+	transport, session, serverConn := auctionTestTransport(t, auctionTestCatalog(), 9)
+	policy := auctionTestConfig()
+	policy.AuctionListPerRobot = 0
+	script := newAuctionScript(func(s *auctionScript) {
+		if _, ok := s.expect(serverConn, protocol.CmdAuctionMyListings, "round opening"); !ok {
+			return
+		}
+		session.dispatchPacket(protocol.Packet{Class: protocol.ClassCommand, Type: protocol.CmdAuctionMyListings, Body: auctionTestListingAnswer()})
+		// The probe reveals a page of ten rows on a board of a hundred.
+		body, ok := s.expect(serverConn, protocol.CmdAuctionSearchPage, "browse probe")
+		if !ok {
+			return
+		}
+		if offset := binary.LittleEndian.Uint32(body[1:5]); offset != 0 {
+			s.fail("probe offset = %d, want 0", offset)
+		}
+		stale := make([][]byte, 0, 10)
+		for index := 0; index < 10; index++ {
+			stale = append(stale, auctionTestRow(uint64(100+index), 90000, "stale", 1072, 1))
+		}
+		session.dispatchPacket(protocol.Packet{Class: protocol.ClassCommand, Type: protocol.CmdAuctionSearchItem, Body: auctionTestBoardAnswer(100, stale...)})
+		// The window is the last four pages, so scanning starts at row 60.
+		body, ok = s.expect(serverConn, protocol.CmdAuctionSearchPage, "browse window")
+		if !ok {
+			return
+		}
+		if offset := binary.LittleEndian.Uint32(body[1:5]); offset != 60 {
+			s.fail("window offset = %d, want 60", offset)
+		}
+		fresh := append(append([][]byte(nil), auctionTestRow(200, 1000, "fresh-player", 1072, 5)), stale[:9]...)
+		session.dispatchPacket(protocol.Packet{Class: protocol.ClassCommand, Type: protocol.CmdAuctionSearchItem, Body: auctionTestBoardAnswer(100, fresh...)})
+		body, ok = s.expect(serverConn, protocol.CmdAuctionBuyPiece, "buy")
+		if !ok {
+			return
+		}
+		if price, count := binary.LittleEndian.Uint32(body[0:4]), binary.LittleEndian.Uint32(body[4:8]); price != 1000 || count != 5 {
+			s.fail("buy price=%d count=%d, want the fresh listing 1000/5", price, count)
+		}
+		session.dispatchPacket(protocol.Packet{Class: protocol.ClassCommand, Type: protocol.CmdAuctionBuyPiece, Body: auctionTestAck(true, 0)})
+		// The window keeps walking; an empty page is where it stops.
+		if _, ok := s.expect(serverConn, protocol.CmdAuctionSearchPage, "browse past the window"); !ok {
+			return
+		}
+		session.dispatchPacket(protocol.Packet{Class: protocol.ClassCommand, Type: protocol.CmdAuctionSearchItem, Body: auctionTestBoardAnswer(100)})
+		s.expectSilence(serverConn, "a board that ran out of rows")
+	})
+	listed, bought, err := transport.AuctionRound(7, policy)
+	if err != nil {
+		t.Fatalf("auction round failed: %v", err)
+	}
+	script.finish(t)
+	if listed != 0 {
+		t.Errorf("listed = %d, want 0", listed)
+	}
+	if bought != 1 {
+		t.Errorf("bought = %d, want the listing from the tail of the board", bought)
 	}
 }
 

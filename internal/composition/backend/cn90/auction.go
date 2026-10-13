@@ -27,6 +27,12 @@ import (
 // of cheap stock cannot drain a wallet in a single tick.
 const auctionBuyPerRound = 3
 
+// auctionBuyScanPages is how many search pages one round reads. The server
+// answers the board one fixed-size page at a time, so reading a large board
+// whole would cost hundreds of round trips per robot per round; the round reads
+// a window of this many pages instead.
+const auctionBuyScanPages = 4
+
 // auctionRoundTimeout bounds one whole round: a listing top-up, a browse and
 // the buys it decides on.
 const auctionRoundTimeout = 30 * time.Second
@@ -194,54 +200,88 @@ func (t *ActionTransport) auctionTopUp(ctx context.Context, auction auctionSessi
 	return added, nil
 }
 
-// auctionBuyUnderpriced buys the player listings that sit at or under the buy
-// gate, cheapest price per unit first is deliberately not applied: the page
-// arrives in the server's own order and the budget caps the round either way.
+// auctionBuyUnderpriced buys the listings that sit at or under the buy gate.
+//
+// The server orders the board oldest first, so the listing every earlier round
+// has already looked at and passed over sits at the front, and the one a player
+// has just put up sits at the back. The round therefore reads a window at the
+// back of the board: re-reading the front would only re-examine listings that
+// no previous round found worth taking. The first request is what reveals the
+// page size and the board size, and it is reused as the window's first page
+// whenever the board is small enough to fit the window whole.
+//
+// Cheapest price per unit first is deliberately not applied: the budget and the
+// per-round quota cap the round either way.
 func (t *ActionTransport) auctionBuyUnderpriced(ctx context.Context, auction auctionSession, uid int, ownIDs map[uint64]struct{}, policy AuctionPolicy) (int, error) {
-	page, err := auction.AuctionSearch(ctx, nil, 0)
+	head, err := auction.AuctionSearch(ctx, nil, 0)
 	if err != nil {
 		return 0, fmt.Errorf("90CN auction browse for uid %d: %w", uid, err)
+	}
+	pageSize := len(head.Listings)
+	if pageSize == 0 {
+		return 0, nil
+	}
+	offset := uint32(0)
+	if window := uint32(pageSize * auctionBuyScanPages); head.Total > window {
+		offset = (head.Total - window) / uint32(pageSize) * uint32(pageSize)
 	}
 	items := t.stackableIndex()
 	spent := 0
 	bought := 0
-	for _, listing := range page.Listings {
+	for scanned := 0; scanned < auctionBuyScanPages && offset < head.Total; scanned++ {
+		page := head
+		if offset > 0 {
+			fetched, err := auction.AuctionSearch(ctx, nil, offset)
+			if err != nil {
+				return bought, fmt.Errorf("90CN auction browse at offset %d for uid %d: %w", offset, uid, err)
+			}
+			page = fetched
+		}
+		if len(page.Listings) == 0 {
+			break
+		}
+		for _, listing := range page.Listings {
+			if bought >= auctionBuyPerRound {
+				break
+			}
+			if _, mine := ownIDs[listing.ListingID]; mine {
+				continue
+			}
+			if listing.BuyoutPrice == 0 {
+				continue
+			}
+			itemID := protocol.AuctionItemID(listing.ItemRaw)
+			item, known := items[int(itemID)]
+			if !known {
+				continue
+			}
+			reference := auctionReferencePrice(item)
+			if reference <= 0 {
+				continue
+			}
+			listed := protocol.AuctionItemCount(listing.ItemRaw)
+			if listed == 0 {
+				listed = 1
+			}
+			unit := int(listing.BuyoutPrice) / int(listed)
+			if unit == 0 || unit > auctionBuyUnitGate(reference, policy.BuyUnitPct) {
+				continue
+			}
+			total := int(listing.BuyoutPrice)
+			if policy.BuyMaxTotal > 0 && spent+total > policy.BuyMaxTotal {
+				continue
+			}
+			if err := auction.AuctionBuy(ctx, listing, 0); err != nil {
+				foundationlog.Robotf("CN90_AUCTION_ROUND_BUY_FAILED uid=%d listing=%d item=%d err=%v\n", uid, listing.ListingID, itemID, err)
+				continue
+			}
+			spent += total
+			bought++
+		}
 		if bought >= auctionBuyPerRound {
 			break
 		}
-		if _, mine := ownIDs[listing.ListingID]; mine {
-			continue
-		}
-		if listing.BuyoutPrice == 0 {
-			continue
-		}
-		itemID := protocol.AuctionItemID(listing.ItemRaw)
-		item, known := items[int(itemID)]
-		if !known {
-			continue
-		}
-		reference := auctionReferencePrice(item)
-		if reference <= 0 {
-			continue
-		}
-		listed := protocol.AuctionItemCount(listing.ItemRaw)
-		if listed == 0 {
-			listed = 1
-		}
-		unit := int(listing.BuyoutPrice) / int(listed)
-		if unit == 0 || unit > auctionBuyUnitGate(reference, policy.BuyUnitPct) {
-			continue
-		}
-		total := int(listing.BuyoutPrice)
-		if policy.BuyMaxTotal > 0 && spent+total > policy.BuyMaxTotal {
-			continue
-		}
-		if err := auction.AuctionBuy(ctx, listing, 0); err != nil {
-			foundationlog.Robotf("CN90_AUCTION_ROUND_BUY_FAILED uid=%d listing=%d item=%d err=%v\n", uid, listing.ListingID, itemID, err)
-			continue
-		}
-		spent += total
-		bought++
+		offset += uint32(len(page.Listings))
 	}
 	return bought, nil
 }
