@@ -20,31 +20,57 @@ const (
 	CmdResponsePeer       uint16 = 11
 	CmdSetUserPosition    uint16 = 35
 	CmdSetUserArea        uint16 = 36
+	CmdMailboxSend        uint16 = 94
+	CmdMailboxExtractItem uint16 = 95
+	CmdMailboxOpen        uint16 = 96
+	CmdChangeLetterStat   uint16 = 134
 	CmdChangeTutorial     uint16 = 143
+	CmdAuctionAverage     uint16 = 182
+	CmdAuctionRegister    uint16 = 183
+	CmdAuctionCancel      uint16 = 184
+	CmdAuctionBid         uint16 = 185
+	CmdAuctionSearchItem  uint16 = 186
+	CmdAuctionSearchPage  uint16 = 187
+	CmdAuctionMyListings  uint16 = 188
+	CmdAuctionMyBids      uint16 = 189
+	CmdAuctionHistory     uint16 = 190
+	CmdMultiMailboxSend   uint16 = 315
+	CmdQueryCharacMailbox uint16 = 324
+	CmdAuctionBuyPiece    uint16 = 334
 	CmdCreateExpertStore  uint16 = 598
 	CmdCloseExpertStore   uint16 = 600
 	CmdCheckCharacterName uint16 = 692
+	CmdMailboxRecipients  uint16 = 789
 	CmdTownSceneReady     uint16 = 1345
 	CmdCheckConnection    uint16 = 1276
 )
 
 // Server packet identities (upper msgID).
 const (
-	NotiChannelInfo         uint16 = 1
-	ResponseEndpoint        uint16 = 1
-	NotiCharacterList       uint16 = 2
-	ResponseSelect          uint16 = 4
-	ResponseCreate          uint16 = 5
-	ResponseDelete          uint16 = 6
-	NotiRequestPeer         uint16 = 0x0007
-	NotiUserPosition        uint16 = 0x0016
-	NotiUserArea            uint16 = 0x0017
-	NotiSceneTransition     uint16 = 24
+	NotiChannelInfo     uint16 = 1
+	ResponseEndpoint    uint16 = 1
+	NotiCharacterList   uint16 = 2
+	ResponseSelect      uint16 = 4
+	ResponseCreate      uint16 = 5
+	ResponseDelete      uint16 = 6
+	NotiRequestPeer     uint16 = 0x0007
+	NotiUserPosition    uint16 = 0x0016
+	NotiUserArea        uint16 = 0x0017
+	NotiSceneTransition uint16 = 24
+	NotiMailboxList     uint16 = 0x0061
+	NotiMailboxRemove   uint16 = 0x0062
+	NotiMailboxAlarm    uint16 = 0x0063
+	// NotiAuctionService shares the number with CmdAuctionRegister, but on the
+	// other side of the session: the server pushes it as a class-0 notification
+	// with the two-byte bodies {0,1} and {1,1} once per session, at the first
+	// auction request. It is not the ACK of a registration.
+	NotiAuctionService      uint16 = 183
 	NotiCompletedQuestGate  uint16 = 356
 	NotiExpertStoreCreate   uint16 = 538
 	NotiExpertStoreClose    uint16 = 539
 	NotiExpertStoreUpdate   uint16 = 544
 	ResponseCheckName       uint16 = 692
+	ResponseMailboxRoles    uint16 = 718
 	ResponseCheckConnection uint16 = 1276
 )
 

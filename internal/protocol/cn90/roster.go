@@ -1,7 +1,6 @@
 package cn90
 
 import (
-	"encoding/binary"
 	"fmt"
 )
 
@@ -21,7 +20,7 @@ type CharacterRosterEntry struct {
 // entry per row, then a four-field trailer. Appearance summary rows are
 // skipped by their declared count; they are not robot identity.
 func DecodeCharacterRoster(body []byte) ([]CharacterRosterEntry, error) {
-	r := rosterReader{body: body}
+	r := wireReader{body: body}
 	if r.skip(13) != nil {
 		return nil, fmt.Errorf("character roster prefix: %w", r.err)
 	}
@@ -68,55 +67,5 @@ func DecodeCharacterRoster(body []byte) ([]CharacterRosterEntry, error) {
 	return entries, nil
 }
 
-type rosterReader struct {
-	body   []byte
-	offset int
-	err    error
-}
-
-func (r *rosterReader) skip(n int) error {
-	if r.err != nil {
-		return r.err
-	}
-	if n < 0 || r.offset+n > len(r.body) {
-		r.err = fmt.Errorf("short body at offset %d", r.offset)
-		return r.err
-	}
-	r.offset += n
-	return nil
-}
-
-func (r *rosterReader) byte() byte {
-	if r.skip(1) != nil {
-		return 0
-	}
-	return r.body[r.offset-1]
-}
-
-func (r *rosterReader) u16() uint16 {
-	if r.skip(2) != nil {
-		return 0
-	}
-	return binary.LittleEndian.Uint16(r.body[r.offset-2 : r.offset])
-}
-
-func (r *rosterReader) u32() uint32 {
-	if r.skip(4) != nil {
-		return 0
-	}
-	return binary.LittleEndian.Uint32(r.body[r.offset-4 : r.offset])
-}
-
-func (r *rosterReader) dstr() []byte {
-	length := r.u32()
-	if r.err != nil {
-		return nil
-	}
-	if length > uint32(len(r.body)-r.offset) {
-		r.err = fmt.Errorf("invalid string length %d", length)
-		return nil
-	}
-	start := r.offset
-	r.offset += int(length)
-	return r.body[start:r.offset]
-}
+// The little-endian cursor lives in wire_reader.go; the roster parser shares it
+// with the mailbox and auction parsers.
