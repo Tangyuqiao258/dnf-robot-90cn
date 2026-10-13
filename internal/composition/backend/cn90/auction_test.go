@@ -1,6 +1,7 @@
 package cn90
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -11,6 +12,21 @@ import (
 	protocol "robot/internal/protocol/cn90"
 	"robot/internal/shared"
 )
+
+// auctionTestPricedCatalog builds the stock pool with a price on one entry and
+// none on the rest: the pool carries items the catalog cannot price, and those
+// never reach the server.
+func auctionTestPricedCatalog(priced int) []shared.EquipmentCatalogItem {
+	catalog := make([]shared.EquipmentCatalogItem, 0, len(cn90AuctionStockPool))
+	for _, id := range cn90AuctionStockPool {
+		item := shared.EquipmentCatalogItem{ID: id, Path: fmt.Sprintf("stackable/item_%d", id)}
+		if id == priced {
+			item.Price = 1000
+		}
+		catalog = append(catalog, item)
+	}
+	return catalog
+}
 
 // auctionTestRow builds one 168-byte search row: listing id at +0, buyout at
 // +13, the seller name at +21 and the compact item row at +43.
@@ -242,6 +258,61 @@ func TestAuctionRoundStopsListingWhenTheCharacterIsFull(t *testing.T) {
 	script.finish(t)
 	if listed != 0 || bought != 0 {
 		t.Fatalf("listed=%d bought=%d, want a quiet round", listed, bought)
+	}
+}
+
+// TestAuctionTopUpWalksPastUnpricedStock pins the round's attempt budget to the
+// calls the server sees. The plan walks the whole pool from a per-character
+// offset, so an unpriced stack can sit in front of every priced one; when those
+// stacks spend the budget the character lists nothing while its bag still holds
+// listable stock, which is what froze the live board.
+func TestAuctionTopUpWalksPastUnpricedStock(t *testing.T) {
+	priced := cn90AuctionStockPool[len(cn90AuctionStockPool)-1]
+	transport, session, serverConn := auctionTestTransport(t, auctionTestPricedCatalog(priced), 9)
+	script := newAuctionScript(func(s *auctionScript) {
+		body, ok := s.expect(serverConn, protocol.CmdAuctionRegister, "the one priced stack")
+		if !ok {
+			return
+		}
+		if unit := binary.LittleEndian.Uint32(body[20:24]); unit != 1000 {
+			s.fail("unit price = %d, want the reference 1000", unit)
+		}
+		session.dispatchPacket(protocol.Packet{Class: protocol.ClassCommand, Type: protocol.CmdAuctionRegister, Body: auctionTestAck(true, 0)})
+		s.expectSilence(serverConn, "after the only priced stack")
+	})
+	policy := AuctionPolicyFromConfig(auctionTestConfig())
+	policy.StockStacks = len(cn90AuctionStockPool)
+	policy.ListPerRobot = 1
+	policy.ListUnitPct = 100
+	listed, err := transport.auctionTopUp(context.Background(), session, 7, 9, map[uint32]struct{}{}, 0, policy)
+	if err != nil {
+		t.Fatalf("auction top-up failed: %v", err)
+	}
+	script.finish(t)
+	if listed != 1 {
+		t.Errorf("listed = %d, want the one stack the catalog can price", listed)
+	}
+}
+
+// TestAuctionTopUpStaysQuietWhenNothingIsPriced is the other half: a plan the
+// catalog can price nowhere sends nothing at all rather than a stream of
+// requests the server would refuse.
+func TestAuctionTopUpStaysQuietWhenNothingIsPriced(t *testing.T) {
+	transport, session, serverConn := auctionTestTransport(t, auctionTestPricedCatalog(0), 9)
+	script := newAuctionScript(func(s *auctionScript) {
+		s.expectSilence(serverConn, "a plan with no priced stack")
+	})
+	policy := AuctionPolicyFromConfig(auctionTestConfig())
+	policy.StockStacks = len(cn90AuctionStockPool)
+	policy.ListPerRobot = 1
+	policy.ListUnitPct = 100
+	listed, err := transport.auctionTopUp(context.Background(), session, 7, 9, map[uint32]struct{}{}, 0, policy)
+	if err != nil {
+		t.Fatalf("auction top-up failed: %v", err)
+	}
+	script.finish(t)
+	if listed != 0 {
+		t.Errorf("listed = %d, want none", listed)
 	}
 }
 

@@ -169,7 +169,10 @@ func (t *ActionTransport) auctionTopUp(ctx context.Context, auction auctionSessi
 	attempts := 0
 	// One attempt per missing listing: a stack the server refuses (its item was
 	// sold while the robot was online, so the seeded row is stale) must not turn
-	// one round into a walk over the whole plan.
+	// one round into a walk over the whole plan. An attempt is a call the server
+	// actually sees, so a stack the price model cannot price does not spend one:
+	// the pool carries unpriced items, and a plan that opens with them would
+	// otherwise exhaust the budget before reaching the stacks it can list.
 	for _, stack := range plan {
 		if added >= remaining || attempts >= remaining {
 			break
@@ -177,11 +180,11 @@ func (t *ActionTransport) auctionTopUp(ctx context.Context, auction auctionSessi
 		if _, exists := listedItems[uint32(stack.ItemID)]; exists {
 			continue
 		}
-		attempts++
 		unit := auctionListUnitPrice(auctionReferencePrice(stack.Item), stack.Count, policy.ListUnitPct)
 		if unit == 0 {
 			continue
 		}
+		attempts++
 		err := auction.AuctionList(ctx, AuctionStack{
 			ListType: cn90MainInventoryList,
 			Slot:     uint16(stack.Slot),
