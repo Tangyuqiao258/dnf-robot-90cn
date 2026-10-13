@@ -230,6 +230,81 @@ func (c *Client) ResponsePeer(ctx context.Context, targetID uint16, mode byte, v
 	return c.send(ctx, CmdResponsePeer, ResponsePeerBody(targetID, mode, value))
 }
 
+// AuctionRegister lists one inventory stack (class1/op183). The acknowledgement
+// is observed by the session: op183 answers as both the register result and the
+// class0 service-open notice, so the two are told apart by packet class.
+func (c *Client) AuctionRegister(ctx context.Context, listType byte, slot uint16, itemID, count, startPrice, buyoutPrice uint32) error {
+	body, err := AuctionRegisterBody(listType, slot, itemID, count, startPrice, buyoutPrice)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdAuctionRegister, body)
+}
+
+// AuctionCancel withdraws one of the session's own listings (class1/op184).
+func (c *Client) AuctionCancel(ctx context.Context, listingID uint64) error {
+	body, err := AuctionCancelBody(listingID)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdAuctionCancel, body)
+}
+
+// AuctionBid places a bid on a listing (class1/op185).
+func (c *Client) AuctionBid(ctx context.Context, price uint32, listingID uint64, sellerName []byte, itemID uint32) error {
+	body, err := AuctionBidBody(price, listingID, sellerName, itemID)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdAuctionBid, body)
+}
+
+// AuctionBuyPiece buys a whole listing or part of a stackable one
+// (class1/op334). The server charges unit price times count and refuses a
+// partial buy on a listing that already carries a bidder.
+func (c *Client) AuctionBuyPiece(ctx context.Context, price, count uint32, listingID uint64, sellerName []byte, itemID uint32) error {
+	body, err := AuctionPieceBody(price, count, listingID, sellerName, itemID)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdAuctionBuyPiece, body)
+}
+
+// AuctionSearchByItem queries the auction page for specific item ids
+// (class1/op186); an empty id list matches every listing.
+func (c *Client) AuctionSearchByItem(ctx context.Context, offset uint32, itemIDs []uint32) error {
+	body, err := AuctionSearchByItemBody(offset, itemIDs)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdAuctionSearchItem, body)
+}
+
+// AuctionSearchCategory queries the auction page without an item filter
+// (class1/op187). The server answers on op186.
+func (c *Client) AuctionSearchCategory(ctx context.Context, offset uint32) error {
+	return c.send(ctx, CmdAuctionSearchPage, AuctionSearchCategoryBody(offset))
+}
+
+// AuctionMyListings asks for the character's own listings (class1/op188).
+func (c *Client) AuctionMyListings(ctx context.Context) error {
+	return c.send(ctx, CmdAuctionMyListings, AuctionMineBody())
+}
+
+// AuctionMyBids asks for the character's own bids (class1/op189).
+func (c *Client) AuctionMyBids(ctx context.Context) error {
+	return c.send(ctx, CmdAuctionMyBids, AuctionMineBody())
+}
+
+// AuctionAveragePrice asks for the item's recent average price (class1/op182).
+func (c *Client) AuctionAveragePrice(ctx context.Context, itemID uint32) error {
+	body, err := AuctionAveragePriceBody(itemID)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdAuctionAverage, body)
+}
+
 // Read reads one inbound packet with cancellation support.
 func (c *Client) Read(ctx context.Context) (Packet, error) {
 	if c == nil || c.conn == nil {
