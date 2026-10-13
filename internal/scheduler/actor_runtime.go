@@ -159,12 +159,18 @@ func (r *RobotRuntime) AutoMove(uid int) robotcap.ActionResult {
 			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
 		}
 		st, ok := r.Status(uid)
-		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 || st.PartyActive || r.PartyActive(uid) {
+		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 {
 			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
 		}
 		rc := r.Config()
 		maps := r.manager.loadMapCatalog()
-		target, hasTarget := r.manager.currentFollowTarget(rc, maps)
+		target, hasTarget := r.manager.currentFollowTarget(uid, rc, maps)
+		// A party owns its member's movement, so a member with nowhere to
+		// follow still stands still. Having a leader position to walk to is the
+		// one case where that rule must not block the move.
+		if !hasTarget && (st.PartyActive || r.PartyActive(uid)) {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
+		}
 		info := robotcap.Info{UID: st.UID, CID: st.CID, GuildID: st.GuildID, Village: st.Village, Area: st.Area, X: st.X, Y: st.Y}
 		var err error
 		if hasTarget {
@@ -883,7 +889,38 @@ func (r *RobotRuntime) run(uid int, fn func() robotcap.ActionResult) (result rob
 	return fn()
 }
 
-func (m *RobotManager) currentFollowTarget(rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem) (robotaction.FollowTarget, bool) {
+// currentFollowTarget resolves the point AutoMove should walk toward. A party
+// leader the session is tracking live takes precedence over the configured
+// follow account: the leader position is exact and already in hand, while the
+// account path is a database lookup that only yields a home village.
+func (m *RobotManager) currentFollowTarget(uid int, rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem) (robotaction.FollowTarget, bool) {
+	if target, ok := m.partyLeaderFollowTarget(uid); ok {
+		return target, true
+	}
+	return m.accountFollowTarget(rc, maps)
+}
+
+// partyLeaderFollowTarget reads the leader position the backend session tracked
+// from the town movement broadcast. The target is deliberately not aged out: a
+// leader standing still broadcasts nothing, so a freshness deadline would turn
+// "the leader is idle" into "wander off". It also means a party that dissolves
+// without closing the session leaves the follower parked near the leader's last
+// known spot rather than roaming, which is the safe direction to fail.
+func (m *RobotManager) partyLeaderFollowTarget(uid int) (robotaction.FollowTarget, bool) {
+	provider, ok := m.actions.(interface {
+		PartyFollowTarget(int) (shared.PartyFollowTarget, bool)
+	})
+	if !ok {
+		return robotaction.FollowTarget{}, false
+	}
+	target, ok := provider.PartyFollowTarget(uid)
+	if !ok || target.CharacterID <= 0 {
+		return robotaction.FollowTarget{}, false
+	}
+	return robotaction.FollowTarget{Village: target.Village, Area: target.Area, X: target.X, Y: target.Y}, true
+}
+
+func (m *RobotManager) accountFollowTarget(rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem) (robotaction.FollowTarget, bool) {
 	account := strings.TrimSpace(rc.FollowAccount)
 	if account == "" || rc.SpawnFixed {
 		return robotaction.FollowTarget{}, false

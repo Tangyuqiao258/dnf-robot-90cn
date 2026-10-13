@@ -1,6 +1,9 @@
 package shared
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type OpenSessionRequest struct {
 	AccountName   string
@@ -14,6 +17,11 @@ type OpenSessionRequest struct {
 	// prompts (class0/0x0007) with the accepting op11 response. Backends
 	// without a party transport leave it unimplemented.
 	EnablePartyAutoAccept bool
+	// EnablePartyFollow makes the session track the live town position of the
+	// party leader it accepted an invitation from, so the runtime can steer the
+	// follower toward it. Backends without a party transport leave it
+	// unimplemented.
+	EnablePartyFollow bool
 	// InitialTown* are robot-owned position metadata used by adapters that
 	// need to distinguish an in-area coordinate move from an area transition.
 	// They are not sent as game-database mutations or protocol credentials.
@@ -44,6 +52,22 @@ type TownAreaMoveIntent struct {
 	// positive and differs from Village the move is a cross-town transition,
 	// which the server only accepts with the portal request shape.
 	SourceVillage int
+}
+
+// PartyFollowTarget is a party leader's last known town position, tracked by a
+// follower session from the same-area movement broadcast the server sends to
+// every player sharing the mover's (town, area) key. It is a snapshot, not a
+// subscription: ObservedAt is when the notice arrived, so a caller can tell a
+// leader that is standing still from one whose notices stopped arriving.
+type PartyFollowTarget struct {
+	// CharacterID identifies the leader. A caller that switched leaders must
+	// not carry the previous leader's position forward.
+	CharacterID int
+	Village     int
+	Area        int
+	X           int
+	Y           int
+	ObservedAt  time.Time
 }
 
 type ShoutChannel string

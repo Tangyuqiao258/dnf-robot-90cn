@@ -190,6 +190,23 @@ func (t *ActionTransport) session(uid int) (shared.RobotSession, error) {
 	return session, nil
 }
 
+// PartyFollowTarget reports the attached session's live party leader position.
+// A session opened without EnablePartyFollow has no tracker and reports false,
+// which leaves the scheduler on whatever follow policy it had before.
+func (t *ActionTransport) PartyFollowTarget(uid int) (shared.PartyFollowTarget, bool) {
+	session, err := t.session(uid)
+	if err != nil {
+		return shared.PartyFollowTarget{}, false
+	}
+	provider, ok := session.(interface {
+		PartyFollowTarget() (shared.PartyFollowTarget, bool)
+	})
+	if !ok {
+		return shared.PartyFollowTarget{}, false
+	}
+	return provider.PartyFollowTarget()
+}
+
 func (t *ActionTransport) MoveTown(ctx context.Context, command shared.RuntimeMoveCommand) error {
 	session, err := t.session(command.UID)
 	if err != nil {

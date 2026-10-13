@@ -326,6 +326,7 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 	}
 	if !m.backendInfo.Supports(shared.CapabilityParty) {
 		rc.AutoPartyAccept = false
+		rc.AutoPartyFollow = false
 	}
 	if !m.backendInfo.Supports(shared.CapabilitySystemAnnouncement) {
 		rc.AutoSystemAnnouncement = false

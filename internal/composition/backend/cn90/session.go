@@ -72,10 +72,13 @@ type Session struct {
 	packetObservers    []*packetObserverRegistration
 	terminationGuard   lockhub.Locker
 	termination        func()
-	selfCharacterID    uint16
-	keepaliveGuard     lockhub.Locker
-	lastCheckAck       time.Time
-	checkAckSeen       bool
+	// follow is the party leader tracker, created only for a session opened
+	// with EnablePartyFollow.
+	follow          *partyFollowState
+	selfCharacterID uint16
+	keepaliveGuard  lockhub.Locker
+	lastCheckAck    time.Time
+	checkAckSeen    bool
 }
 
 type packetObserverRegistration struct {
@@ -164,6 +167,9 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	}
 	if request.EnablePartyAutoAccept {
 		session.startPartyAutoAccept(runCtx)
+	}
+	if request.EnablePartyFollow {
+		session.startPartyFollow(runCtx)
 	}
 	go session.drain(runCtx)
 	go session.keepalive(runCtx)

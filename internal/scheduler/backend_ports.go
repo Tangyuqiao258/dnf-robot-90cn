@@ -177,6 +177,7 @@ func (d protocolSessionDriver) SendOnline(users []shared.RuntimeOnlineUser) erro
 			AccountName: user.AccountName, PasswordHash: user.PasswordHash, CharacterSlot: uint16(user.CharacterSlot),
 			EnablePartyDungeonFollower: backendPartyFollowerEnabled(d.manager.backendInfo, rc),
 			EnablePartyAutoAccept:      backendPartyAutoAcceptEnabled(d.manager.backendInfo, rc),
+			EnablePartyFollow:          backendPartyFollowEnabled(d.manager.backendInfo, rc),
 			InitialTownKnown:           true,
 			InitialVillage:             user.BirthVillage,
 			InitialArea:                user.BirthArea,
@@ -211,6 +212,13 @@ func backendPartyFollowerEnabled(info shared.BackendInfo, rc robotconfig.Runtime
 // a directly constructed config honest too.
 func backendPartyAutoAcceptEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
 	return rc.AutoPartyAccept && info.Supports(shared.CapabilityParty)
+}
+
+// backendPartyFollowEnabled reports whether new sessions should also track the
+// accepted leader's live town position. Following rides on the same party
+// transport as auto-accept, so it is gated by the same capability.
+func backendPartyFollowEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
+	return rc.AutoPartyFollow && info.Supports(shared.CapabilityParty)
 }
 
 func (d protocolSessionDriver) closeOpened(uids []int) {
