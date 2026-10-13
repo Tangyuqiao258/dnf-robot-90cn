@@ -77,3 +77,28 @@ func TestNameEncodingRules(t *testing.T) {
 		t.Fatalf("db name should not be empty")
 	}
 }
+
+// TestGameSlotMeasuresGBKBytes pins the 90CN name window: the server measures
+// the name in GBK bytes and accepts 2..30 of them. Measuring UTF-8 bytes, as
+// this check used to, rejected every Chinese name of seven or more characters.
+func TestGameSlotMeasuresGBKBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"迷你战士宠物装备", true},                // 24 UTF-8 bytes, 16 GBK bytes
+		{strings.Repeat("甲", 15), true},   // exactly 30 GBK bytes
+		{strings.Repeat("甲", 16), false},  // 32 GBK bytes, over the limit
+		{"甲", true},                       // one character is already 2 GBK bytes
+		{"甲a甲a甲a甲a甲a甲a甲a甲a甲a甲a甲a", false}, // mixed, 34 GBK bytes
+		{"🎉", false},                      // not representable in GBK
+	}
+	for _, tc := range cases {
+		if got := FitsGameSlot(tc.name); got != tc.want {
+			t.Fatalf("FitsGameSlot(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if got := DBName("吴翰林"); got != "吴翰林" {
+		t.Fatalf("DBName mangled a Chinese name: %q", got)
+	}
+}

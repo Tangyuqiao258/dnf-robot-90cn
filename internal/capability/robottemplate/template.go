@@ -168,23 +168,36 @@ func reserveName(name string, used map[string]struct{}, exists func(string) bool
 	return true
 }
 
+// DBName is the key used for the reserved/used name bookkeeping and for the
+// name_exists lookup. The server stores the character name as UTF-8 (checked
+// against a row created by the retail client), so the key is the name itself.
+// The old utf8_cp1252 projection was a leftover from the Japanese server: it
+// mangled every Chinese name into bytes the server never stores, so name_exists
+// could not match an existing row and duplicates slipped through.
 func DBName(name string) string {
-	return NameForEncoding(name, "utf8_cp1252").(string)
+	return name
 }
 
+// The create-name contract measures the name in GBK bytes on the wire and
+// accepts 2..30 of them; the provision path enforces the same window.
+const (
+	minGameNameBytes = 2
+	maxGameNameBytes = 30
+)
+
+// FitsGameSlot reports whether a configured name can be created as it stands.
+// The limit is the GBK byte length, not the UTF-8 one: measuring UTF-8 bytes
+// rejected every Chinese name of seven or more characters, which is 21+ UTF-8
+// bytes but only 15+ legal GBK bytes, and the old Windows-1252 round-trip
+// rejected every Chinese name outright.
 func FitsGameSlot(name string) bool {
 	name = strings.TrimSpace(name)
-	if name == "" || len([]byte(name)) > 20 {
+	if name == "" {
 		return false
 	}
-	return string(charset.Windows1252StringBytes(charset.UTF8AsWindows1252String(name))) == name
-}
-
-func NameForEncoding(name, encoding string) interface{} {
-	switch strings.ToLower(strings.TrimSpace(encoding)) {
-	case "utf8_cp1252":
-		return charset.UTF8AsWindows1252String(name)
-	default:
-		return name
+	raw, err := charset.EncodeGBKString(name)
+	if err != nil {
+		return false
 	}
+	return len(raw) >= minGameNameBytes && len(raw) <= maxGameNameBytes
 }
