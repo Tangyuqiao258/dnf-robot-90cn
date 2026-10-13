@@ -35,6 +35,17 @@ type OpenSessionRequest struct {
 	// supplied per session rather than read by the adapter, because the template
 	// file belongs to the runtime configuration the scheduler owns.
 	ChatReplies []string
+	// EnableTrade makes the session answer a same-area trade prompt and drive the
+	// window to completion, offering one stack of its own stock. Backends without
+	// a player-to-player trade transport leave it unimplemented.
+	EnableTrade bool
+	// TradeOfferStacks is how many of the backend's own seeded stock rows an
+	// automatic trade may try to offer from. The rows themselves are backend
+	// knowledge -- the adapter is the only side that knows which bag slots it
+	// filled -- so the caller supplies the count and the adapter names the slots.
+	TradeOfferStacks int
+	// TradeOfferCount is how many items one automatic offer moves out of the bag.
+	TradeOfferCount int
 	// InitialTown* are robot-owned position metadata used by adapters that
 	// need to distinguish an in-area coordinate move from an area transition.
 	// They are not sent as game-database mutations or protocol credentials.

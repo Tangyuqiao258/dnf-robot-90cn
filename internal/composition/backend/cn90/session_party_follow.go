@@ -79,6 +79,13 @@ func (s *Session) observePartyFollow(packet protocol.Packet) {
 			foundationlog.Robotf("CN90_PARTY_FOLLOW_CANDIDATE cid=%d inviter=%d mode=%d\n", s.selfCharacterID, notice.SourceID, notice.Mode)
 		}
 	case packet.Class == protocol.ClassCommand && packet.Type == protocol.CmdResponsePeer:
+		// Op11 answers a party invite and a trade prompt alike, and both succeed
+		// with the same leading byte, so the two are told apart by the trailing
+		// byte the server only appends for a trade. Without this a trade accept
+		// would promote a party candidate that was never answered.
+		if _, isTradeAck := protocol.ParseTradeResponseAck(packet.Body); isTradeAck {
+			return
+		}
 		ok, code := protocol.ResponsePeerResult(packet.Body)
 		if !ok {
 			foundationlog.Robotf("CN90_PARTY_FOLLOW_ACCEPT_REJECTED cid=%d code=%d\n", s.selfCharacterID, code)

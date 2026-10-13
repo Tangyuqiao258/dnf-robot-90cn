@@ -26,6 +26,7 @@ const (
 	CapabilitySkill              BackendCapability = "skill"
 	CapabilityEmote              BackendCapability = "emote"
 	CapabilityMarket             BackendCapability = "market"
+	CapabilityTrade              BackendCapability = "trade"
 	CapabilityCleanup            BackendCapability = "cleanup"
 	CapabilityDangerousDelete    BackendCapability = "dangerous_delete"
 	CapabilityMailNotification   BackendCapability = "mail_notification"
@@ -141,7 +142,7 @@ func CapabilityMatrix(status CapabilityStatus) map[BackendCapability]CapabilityS
 		CapabilityProvision, CapabilityTownMove, CapabilityDungeonMove, CapabilityDungeonFollow,
 		CapabilityShout, CapabilityWorldShout, CapabilityStore, CapabilityParty, CapabilityGuildInvite,
 		CapabilityPartyDebug, CapabilitySkill,
-		CapabilityMarket, CapabilityCleanup, CapabilityDangerousDelete,
+		CapabilityMarket, CapabilityTrade, CapabilityCleanup, CapabilityDangerousDelete,
 		CapabilityMailNotification,
 		CapabilityDatabase, CapabilityDiagnostics,
 		CapabilitySystemAnnouncement, CapabilityServerNotice, CapabilityServiceControl,

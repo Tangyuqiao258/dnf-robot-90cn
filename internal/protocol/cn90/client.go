@@ -270,9 +270,26 @@ func (c *Client) RequestPeer(ctx context.Context, targetID uint16, mode byte, va
 }
 
 // ResponsePeer answers a forwarded peer prompt with the exact seven-byte op11
-// shape. Party invites accept with value 0 (modes 0/12) or 1 (modes 4/13).
+// shape. Party invites accept with value 0 (modes 0/12) or 1 (modes 4/13), and
+// a trade prompt accepts with value 0.
 func (c *Client) ResponsePeer(ctx context.Context, targetID uint16, mode byte, value uint32) error {
 	return c.send(ctx, CmdResponsePeer, ResponsePeerBody(targetID, mode, value))
+}
+
+// MoveItemspace sends the twenty-eight byte op19 item move. Outside a trade the
+// server routes it to the ordinary inventory handler; while a trade is open it
+// is the trade window's offer and withdrawal command.
+func (c *Client) MoveItemspace(ctx context.Context, request TradeMoveRequest) error {
+	return c.send(ctx, CmdMoveItemspace, TradeMoveBody(request))
+}
+
+// ItemTradeState sends the one byte op24 trade-window state.
+func (c *Client) ItemTradeState(ctx context.Context, state byte) error {
+	body, err := TradeStateBody(state)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdItemTradeState, body)
 }
 
 // MailboxOpen opens the session's mailbox (class1/op96). The body must be

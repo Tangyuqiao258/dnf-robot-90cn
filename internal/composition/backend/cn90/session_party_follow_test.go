@@ -169,6 +169,27 @@ func TestSessionPartyFollowTradePromptIsNotACandidate(t *testing.T) {
 	}
 }
 
+// TestSessionPartyFollowTradeAckIsNotAPartyAnswer covers the other direction of
+// the shared opcode: a trade accept succeeds on op11 exactly like a party
+// answer, so a session that set a candidate from an unanswered invite must not
+// promote it when the trade module answers something else entirely.
+func TestSessionPartyFollowTradeAckIsNotAPartyAnswer(t *testing.T) {
+	session := newPartyFollowTestSession(t)
+	dispatchInvitePrompt(session, 1001, 13)
+	// The five byte shape the server only sends for a mode 1 answer.
+	ack := []byte{1}
+	ack = binary.LittleEndian.AppendUint16(ack, 2002)
+	ack = append(ack, protocol.TradeRequestMode, 0)
+	session.dispatchPacket(protocol.Packet{Class: protocol.ClassCommand, Type: protocol.CmdResponsePeer, Body: ack})
+	// The harm is not the promotion itself but the walk it enables: the server
+	// broadcasts every town mover, so a promoted non-leader becomes a target on
+	// the very next position notice it sends.
+	dispatchPosition(session, 1001, 520, 310)
+	if target, ok := session.PartyFollowTarget(); ok {
+		t.Fatalf("a trade acknowledgement made %d a follow target: %+v", target.CharacterID, target)
+	}
+}
+
 func TestSessionPartyFollowRejectedAnswerNamesNoLeader(t *testing.T) {
 	session := newPartyFollowTestSession(t)
 	dispatchInvitePrompt(session, 1001, 13)

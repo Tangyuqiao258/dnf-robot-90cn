@@ -181,6 +181,9 @@ func (d protocolSessionDriver) SendOnline(users []shared.RuntimeOnlineUser) erro
 			EnableDungeonRevive:        backendDungeonReviveEnabled(d.manager.backendInfo, rc),
 			EnableChatReply:            backendChatReplyEnabled(d.manager.backendInfo, rc),
 			ChatReplies:                d.manager.loadShoutTemplates().Messages,
+			EnableTrade:                backendTradeEnabled(d.manager.backendInfo, rc),
+			TradeOfferStacks:           rc.AuctionStockStacks,
+			TradeOfferCount:            1,
 			InitialTownKnown:           true,
 			InitialVillage:             user.BirthVillage,
 			InitialArea:                user.BirthArea,
@@ -233,6 +236,14 @@ func backendDungeonReviveEnabled(info shared.BackendInfo, rc robotconfig.Runtime
 // broadcast still declares CapabilityShout, so that is the gate.
 func backendChatReplyEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
 	return rc.AutoChatReply && info.Supports(shared.CapabilityShout)
+}
+
+// backendTradeEnabled reports whether new sessions should answer a same-area
+// trade prompt. Such a session gives away one stack of the stock the character
+// was seeded with on every prompt it accepts, so the switch is the only thing
+// standing between a party of robots and their own inventory.
+func backendTradeEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
+	return rc.AutoTrade && info.Supports(shared.CapabilityTrade)
 }
 
 func (d protocolSessionDriver) closeOpened(uids []int) {

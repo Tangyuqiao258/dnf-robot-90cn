@@ -45,8 +45,10 @@ func ParseRequestPeerNotice(body []byte) (RequestPeerNotice, bool) {
 // accepts it and reports whether the mode is a party invite at all.
 // The current EXE accepts ordinary mode-0/12 prompts with value zero and
 // quick-party modes 4/13 with value one; mode 1 is the trade prompt and mode
-// 15 the town-menu marker, and both must stay unanswered
-// (party_online.go isPartyInviteResponse / peerResponseRejected).
+// 15 the town-menu marker, so neither is a party invite here
+// (party_online.go isPartyInviteResponse / peerResponseRejected). The trade
+// prompt is answered by the trade session instead, with the same op11 shape and
+// a zero value.
 func PartyInviteAcceptValue(mode byte) (uint32, bool) {
 	switch mode {
 	case 0, 12:
@@ -58,21 +60,23 @@ func PartyInviteAcceptValue(mode byte) (uint32, bool) {
 	}
 }
 
-// RequestPeerBody builds the op10 request body for a party invite mode. The
-// server validates the body length strictly per mode: modes 0/12 carry the
-// 13-byte shape (u16 value1 + u32 value2 tail) and modes 4/13 the 11-byte
-// shape (u32 value2 tail) (party/request.go DecodeRequestPeerRequest).
+// RequestPeerBody builds the op10 request body for a forwarded peer request
+// mode. The server validates the body length strictly per mode: modes 0/12
+// carry the 13-byte shape (u16 value1 + u32 value2 tail) and modes 1/4/13 the
+// 11-byte shape (u32 value2 tail) (party/request.go DecodeRequestPeerRequest).
+// Mode 1 is the trade request, which the server records as a pending invite and
+// forwards to the target exactly like a party invite.
 func RequestPeerBody(targetID uint16, mode byte, value0, value2 uint32) ([]byte, error) {
 	var body []byte
 	switch mode {
 	case 0, 12:
 		body = make([]byte, 13)
 		binary.LittleEndian.PutUint32(body[9:13], value2)
-	case 4, 13:
+	case TradeRequestMode, 4, 13:
 		body = make([]byte, 11)
 		binary.LittleEndian.PutUint32(body[7:11], value2)
 	default:
-		return nil, fmt.Errorf("cn90 peer request mode %d is not a party invite mode", mode)
+		return nil, fmt.Errorf("cn90 peer request mode %d is not a forwarded peer request mode", mode)
 	}
 	binary.LittleEndian.PutUint16(body[:2], targetID)
 	body[2] = mode

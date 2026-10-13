@@ -136,6 +136,7 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.AutoPartyFollow = dec.Bool("auto", "auto_party_follow", rc.AutoPartyFollow)
 	rc.AutoDungeonRevive = dec.Bool("auto", "auto_dungeon_revive", rc.AutoDungeonRevive)
 	rc.AutoChatReply = dec.Bool("auto", "auto_chat_reply", rc.AutoChatReply)
+	rc.AutoTrade = dec.Bool("auto", "auto_trade", rc.AutoTrade)
 	rc.AutoSystemAnnouncement = dec.Bool("auto", "auto_system_announcement", rc.AutoSystemAnnouncement)
 	rc.AutoTargetOnlineCount = dec.Int("auto", "auto_target_online_count", rc.AutoTargetOnlineCount)
 	rc.AutoMoveIntervalMinSec = dec.Int("auto", "auto_move_interval_min_sec", rc.AutoMoveIntervalMinSec)

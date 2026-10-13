@@ -57,8 +57,20 @@ func TestRequestPeerBodyMatchesPerModeLengths(t *testing.T) {
 		!bytes.Equal(body[9:13], []byte{0x44, 0x33, 0x22, 0x11}) {
 		t.Fatalf("mode 0 body = % X", body)
 	}
-	if _, err := RequestPeerBody(1002, 1, 0, 0); err == nil {
-		t.Fatal("trade mode was accepted as a party invite mode")
+	// Mode 1 is the trade request. It is not a party invite, but the server
+	// forwards it on the same route and decodes the same eleven-byte shape, so
+	// the encoder must build it.
+	body, err = RequestPeerBody(1002, TradeRequestMode, 0, 0)
+	if err != nil {
+		t.Fatalf("trade request body: %v", err)
+	}
+	if len(body) != 11 || !bytes.Equal(body[:7], []byte{0xea, 0x03, 1, 0, 0, 0, 0}) {
+		t.Fatalf("mode 1 body = % X", body)
+	}
+	// Mode 2 is the nearest mode the server neither decodes nor forwards; the
+	// encoder must keep refusing it rather than inventing a shape.
+	if _, err := RequestPeerBody(1002, 2, 0, 0); err == nil {
+		t.Fatal("mode 2 was accepted as a forwarded peer request mode")
 	}
 }
 

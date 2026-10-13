@@ -17,6 +17,7 @@ func TestMetadataReflectsVerifiedCapabilities(t *testing.T) {
 		shared.CapabilityStore, shared.CapabilityParty, shared.CapabilityMarket,
 		shared.CapabilityMailNotification, shared.CapabilityEmote,
 		shared.CapabilityDungeonRevive, shared.CapabilityShout,
+		shared.CapabilityTrade,
 	} {
 		if !info.Supports(capability) {
 			t.Fatalf("verified capability %s is disabled: %+v", capability, info.Capabilities[capability])

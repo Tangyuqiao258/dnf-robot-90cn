@@ -21,6 +21,12 @@ const (
 	CmdEnterSelectDungeon uint16 = 15
 	CmdSelectDungeon      uint16 = 16
 	CmdPeerChat           uint16 = 17
+	CmdMoveItemspace      uint16 = 19
+	// CmdItemTradeState is the one byte trade-window state. The server decodes
+	// the same number as a scene-transition message and lets the trade handler
+	// claim it first, but only while a trade is open on that session; nothing
+	// here ever sends it outside a trade.
+	CmdItemTradeState     uint16 = 24
 	CmdSetUserPosition    uint16 = 35
 	CmdSetUserArea        uint16 = 36
 	CmdDieCharacter       uint16 = 40
@@ -53,13 +59,23 @@ const (
 
 // Server packet identities (upper msgID).
 const (
-	NotiChannelInfo     uint16 = 1
-	ResponseEndpoint    uint16 = 1
-	NotiCharacterList   uint16 = 2
-	ResponseSelect      uint16 = 4
-	ResponseCreate      uint16 = 5
-	ResponseDelete      uint16 = 6
-	NotiRequestPeer     uint16 = 0x0007
+	NotiChannelInfo   uint16 = 1
+	ResponseEndpoint  uint16 = 1
+	NotiCharacterList uint16 = 2
+	ResponseSelect    uint16 = 4
+	ResponseCreate    uint16 = 5
+	ResponseDelete    uint16 = 6
+	NotiRequestPeer   uint16 = 0x0007
+	// NotiPeerResponse is the class0/0x0008 answer the server sends the original
+	// requester when the target answers an op10 request. For a trade request it
+	// is the only signal that the window opened.
+	NotiPeerResponse uint16 = 0x0008
+	// The trade window's own notice family. Opcodes 15..18 collide with the
+	// client command numbers above; these are the class0 directions.
+	NotiTradeChange     uint16 = 15
+	NotiTradeCancel     uint16 = 16
+	NotiTradeState      uint16 = 17
+	NotiTradeFinish     uint16 = 18
 	NotiUserPosition    uint16 = 0x0016
 	NotiUserArea        uint16 = 0x0017
 	NotiSceneTransition uint16 = 24
@@ -73,9 +89,9 @@ const (
 	NotiDungeonDeathState uint16 = 32
 	// NotiPeerChatMessage is the delivery notice the server sends to the target
 	// of a directed chat message. Opcode 17 is reused on the same session as a
-	// class0 peer state row, and the item-trade state machine pushes that same
-	// three-byte row on the same opcode, so a reader must not take a class0/op17
-	// packet as proof that a message arrived. Opcode 118 is 0x76.
+	// class0 peer state row, and the trade window pushes that same three-byte row
+	// as NotiTradeState, so a reader must not take a class0/op17 packet as proof
+	// that a message arrived. Opcode 118 is 0x76.
 	NotiPeerChatMessage uint16 = 118
 	NotiMailboxList     uint16 = 0x0061
 	NotiMailboxRemove   uint16 = 0x0062

@@ -94,6 +94,14 @@ type Session struct {
 	chatQueue        chan chatReplyTarget
 	chatReplies      []string
 	chatReplyEnabled bool
+	// trade is the item-trade window view, created for every session. Only the
+	// worker writes to the socket, and only when the request asked for it, so
+	// tradeQueue stays nil unless the session was opened with EnableTrade.
+	trade            *tradeState
+	tradeQueue       chan tradeEventKind
+	tradeOfferStacks int
+	tradeOfferCount  int
+	tradeEnabled     bool
 	selfCharacterID  uint16
 	keepaliveGuard   lockhub.Locker
 	lastCheckAck     time.Time
@@ -187,6 +195,8 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 		client: client, cancel: cancel, done: make(chan struct{}), keepaliveDone: make(chan struct{}),
 		selfCharacterID: selfCharacterID, chat: &chatState{},
 		chatReplies: request.ChatReplies, chatReplyEnabled: request.EnableChatReply,
+		trade: &tradeState{}, tradeEnabled: request.EnableTrade,
+		tradeOfferStacks: request.TradeOfferStacks, tradeOfferCount: request.TradeOfferCount,
 	}
 	// The entry presence above reported a coordinate with op36, which is a
 	// scene transition rather than a coordinate report: the server accepts it
@@ -214,6 +224,11 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	// recording whether or not this session answers it. Only the reply worker
 	// writes to the socket, and only when the request asked for it.
 	session.startChat(runCtx)
+	// Receiving a trade prompt is unconditional for the same reason chat is:
+	// another player's request is worth recording either way. The trade observer
+	// also owns the window view the party-follow tracker consults to know that an
+	// op11 acknowledgement was a trade answer rather than a party one.
+	session.startTrade(runCtx)
 	go session.drain(runCtx)
 	go session.keepalive(runCtx)
 	closeOnError = false
