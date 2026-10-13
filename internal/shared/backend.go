@@ -36,6 +36,13 @@ const (
 	CapabilityServiceControl     BackendCapability = "service_control"
 )
 
+// ShoutModeDirected marks a backend whose CapabilityShout is enabled for
+// messages that name their target rather than for broadcast. Nothing can be
+// shouted at "everyone nearby" on such a backend, so a caller holding a
+// target-less intent has to be refused instead of having a target invented for
+// it. Backends that broadcast leave the mode empty.
+const ShoutModeDirected = "directed"
+
 type CapabilityStatus struct {
 	Enabled bool   `json:"enabled"`
 	Reason  string `json:"reason,omitempty"`

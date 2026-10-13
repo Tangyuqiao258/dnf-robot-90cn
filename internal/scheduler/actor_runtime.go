@@ -126,7 +126,7 @@ func (r *RobotRuntime) Shout(uid int, world bool) robotcap.ActionResult {
 			if err := r.manager.requireBackendCapability(shared.CapabilityWorldShout); err != nil {
 				return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
 			}
-		} else if err := r.manager.requireBackendCapability(shared.CapabilityShout); err != nil {
+		} else if err := r.manager.requireBroadcastShout(); err != nil {
 			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
 		}
 		res, err := r.manager.shoutService().ShoutOne(robotcap.CommandRequest{UIDs: []int{uid}}, world)
@@ -195,7 +195,7 @@ func (r *RobotRuntime) AutoShout(uid int, world bool, msg string) robotcap.Actio
 			}
 		}
 		if !world {
-			if err := r.manager.requireBackendCapability(shared.CapabilityShout); err != nil {
+			if err := r.manager.requireBroadcastShout(); err != nil {
 				return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
 			}
 		}

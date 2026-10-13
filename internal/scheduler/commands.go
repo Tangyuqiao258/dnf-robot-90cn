@@ -78,7 +78,7 @@ func (m *RobotManager) ShoutManaged(req robotcap.CommandRequest, world bool) (ro
 		if err := m.requireBackendCapability(shared.CapabilityWorldShout); err != nil {
 			return robotcap.CommandResult{}, err
 		}
-	} else if err := m.requireBackendCapability(shared.CapabilityShout); err != nil {
+	} else if err := m.requireBroadcastShout(); err != nil {
 		return robotcap.CommandResult{}, err
 	}
 	if world {

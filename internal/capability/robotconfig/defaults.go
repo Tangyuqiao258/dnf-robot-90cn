@@ -26,7 +26,7 @@ func Default() RuntimeConfig {
 		AuctionIntervalMinSec: 300, AuctionIntervalMaxSec: 900,
 		MailEnabled: true, MailIntervalMinSec: 300, MailIntervalMaxSec: 900,
 		FollowRadiusX: 120, FollowRadiusY: 30, ShoutDelayMS: 1000, ShoutSendEnabled: true,
-		AutoActions: true, AutoMailNotify: true, AutoPartyAccept: true, AutoPartyFollow: true, AutoDungeonRevive: true, AutoSystemAnnouncement: true, AutoTargetOnlineCount: 20,
+		AutoActions: true, AutoMailNotify: true, AutoPartyAccept: true, AutoPartyFollow: true, AutoDungeonRevive: true, AutoChatReply: true, AutoSystemAnnouncement: true, AutoTargetOnlineCount: 20,
 		AutoServerNotice:                false,
 		ServerNoticeRobotIntervalMinSec: 900,
 		ServerNoticeRobotIntervalMaxSec: 3600,

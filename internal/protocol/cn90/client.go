@@ -185,6 +185,17 @@ func (c *Client) UseCoin(ctx context.Context, objectKey uint16) error {
 	return c.send(ctx, CmdUseCoin, UseCoinBody(objectKey))
 }
 
+// SendPeerChat delivers one directed chat message to another character. The
+// server only forwards it while both characters stand in the same town area,
+// and it only answers the request when it does.
+func (c *Client) SendPeerChat(ctx context.Context, messageType byte, targetID uint16, message, targetName []byte) error {
+	body, err := PeerChatRequestBody(messageType, targetID, message, targetName)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdPeerChat, body)
+}
+
 // TownSceneReady sends the legacy type1345 u32(2) acknowledgement the live
 // client emits right after the first typed op24. The server uses it to release
 // the deferred scene tail and the HUD gauges.

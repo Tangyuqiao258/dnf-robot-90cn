@@ -16,7 +16,7 @@ func TestMetadataReflectsVerifiedCapabilities(t *testing.T) {
 		shared.CapabilityCleanup, shared.CapabilityDangerousDelete, shared.CapabilityDatabase,
 		shared.CapabilityStore, shared.CapabilityParty, shared.CapabilityMarket,
 		shared.CapabilityMailNotification, shared.CapabilityEmote,
-		shared.CapabilityDungeonRevive,
+		shared.CapabilityDungeonRevive, shared.CapabilityShout,
 	} {
 		if !info.Supports(capability) {
 			t.Fatalf("verified capability %s is disabled: %+v", capability, info.Capabilities[capability])
@@ -25,9 +25,13 @@ func TestMetadataReflectsVerifiedCapabilities(t *testing.T) {
 	if info.Capabilities[shared.CapabilityDatabase].Mode != "sqlite_health" {
 		t.Fatalf("database mode = %+v", info.Capabilities[shared.CapabilityDatabase])
 	}
+	// Chat is enabled but point-to-point. Without the mode a caller holding a
+	// target-less shout intent would have no way to know it cannot be served.
+	if mode := info.Capabilities[shared.CapabilityShout].Mode; mode != shared.ShoutModeDirected {
+		t.Fatalf("shout mode = %q want %q", mode, shared.ShoutModeDirected)
+	}
 	for _, capability := range []shared.BackendCapability{
 		shared.CapabilityDungeonFollow, shared.CapabilityGuildInvite,
-		shared.CapabilityShout,
 	} {
 		if info.Supports(capability) || info.Capabilities[capability].Reason == "" {
 			t.Fatalf("%s must remain disabled with reason: %+v", capability, info.Capabilities[capability])

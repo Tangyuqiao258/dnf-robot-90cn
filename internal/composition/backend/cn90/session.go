@@ -85,11 +85,19 @@ type Session struct {
 	// reviveQueue carries death notices to the revive worker. It is nil unless
 	// the session was opened with EnableDungeonRevive, which is what keeps the
 	// observer from queueing work nobody will send.
-	reviveQueue     chan struct{}
-	selfCharacterID uint16
-	keepaliveGuard  lockhub.Locker
-	lastCheckAck    time.Time
-	checkAckSeen    bool
+	reviveQueue chan struct{}
+	// chat holds the senders this session has already answered. It is created
+	// for every session, because receiving is unconditional; chatQueue stays nil
+	// unless the session was opened with EnableChatReply, which is what keeps
+	// the observer from queueing work nobody will send.
+	chat             *chatState
+	chatQueue        chan chatReplyTarget
+	chatReplies      []string
+	chatReplyEnabled bool
+	selfCharacterID  uint16
+	keepaliveGuard   lockhub.Locker
+	lastCheckAck     time.Time
+	checkAckSeen     bool
 }
 
 type packetObserverRegistration struct {
@@ -177,7 +185,8 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	runCtx, cancel := context.WithCancel(context.Background())
 	session := &Session{
 		client: client, cancel: cancel, done: make(chan struct{}), keepaliveDone: make(chan struct{}),
-		selfCharacterID: selfCharacterID,
+		selfCharacterID: selfCharacterID, chat: &chatState{},
+		chatReplies: request.ChatReplies, chatReplyEnabled: request.EnableChatReply,
 	}
 	// The entry presence above reported a coordinate with op36, which is a
 	// scene transition rather than a coordinate report: the server accepts it
@@ -201,6 +210,10 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	if request.EnableDungeonRevive {
 		session.startDungeonRevive(runCtx)
 	}
+	// Receiving chat is unconditional: a message from another player is worth
+	// recording whether or not this session answers it. Only the reply worker
+	// writes to the socket, and only when the request asked for it.
+	session.startChat(runCtx)
 	go session.drain(runCtx)
 	go session.keepalive(runCtx)
 	closeOnError = false
@@ -351,18 +364,6 @@ func (s *Session) MoveTownArea(ctx context.Context, intent shared.TownAreaMoveIn
 		return ctx.Err()
 	case <-s.Done():
 		return fmt.Errorf("90CN session ended during town area transition")
-	}
-}
-
-// Shout is not implemented for 90CN: the server has no broadcast shout. It
-// only forwards same-area directed peer chat (the class1/op17 request carries
-// a target id and name, delivered as a class0/op118 notice), which the
-// target-less ShoutIntent cannot express.
-func (s *Session) Shout(ctx context.Context, intent shared.ShoutIntent) error {
-	return shared.UnsupportedCapabilityError{
-		Backend:   BackendID,
-		Operation: shared.CapabilityShout,
-		Reason:    "90CN has no broadcast shout; only same-area directed peer chat exists and the target-less shout intent cannot express it",
 	}
 }
 

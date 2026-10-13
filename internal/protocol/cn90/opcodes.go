@@ -20,6 +20,7 @@ const (
 	CmdResponsePeer       uint16 = 11
 	CmdEnterSelectDungeon uint16 = 15
 	CmdSelectDungeon      uint16 = 16
+	CmdPeerChat           uint16 = 17
 	CmdSetUserPosition    uint16 = 35
 	CmdSetUserArea        uint16 = 36
 	CmdDieCharacter       uint16 = 40
@@ -70,9 +71,15 @@ const (
 	// NotiDungeonDeathState carries the acting session's own death and revive
 	// notices. The server never sends it to anyone else.
 	NotiDungeonDeathState uint16 = 32
-	NotiMailboxList       uint16 = 0x0061
-	NotiMailboxRemove     uint16 = 0x0062
-	NotiMailboxAlarm      uint16 = 0x0063
+	// NotiPeerChatMessage is the delivery notice the server sends to the target
+	// of a directed chat message. Opcode 17 is reused on the same session as a
+	// class0 peer state row, and the item-trade state machine pushes that same
+	// three-byte row on the same opcode, so a reader must not take a class0/op17
+	// packet as proof that a message arrived. Opcode 118 is 0x76.
+	NotiPeerChatMessage uint16 = 118
+	NotiMailboxList     uint16 = 0x0061
+	NotiMailboxRemove   uint16 = 0x0062
+	NotiMailboxAlarm    uint16 = 0x0063
 	// NotiAuctionService shares the number with CmdAuctionRegister, but on the
 	// other side of the session: the server pushes it as a class-0 notification
 	// with the two-byte bodies {0,1} and {1,1} once per session, at the first

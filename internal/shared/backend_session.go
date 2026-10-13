@@ -27,6 +27,14 @@ type OpenSessionRequest struct {
 	// returned to town by the server's ten second timer. Backends without a
 	// dungeon transport leave it unimplemented.
 	EnableDungeonRevive bool
+	// EnableChatReply makes the session answer a directed message from another
+	// character on its own, with one line drawn from ChatReplies. Backends
+	// without a directed-chat transport leave it unimplemented.
+	EnableChatReply bool
+	// ChatReplies are the lines an automatic chat reply is drawn from. They are
+	// supplied per session rather than read by the adapter, because the template
+	// file belongs to the runtime configuration the scheduler owns.
+	ChatReplies []string
 	// InitialTown* are robot-owned position metadata used by adapters that
 	// need to distinguish an in-area coordinate move from an area transition.
 	// They are not sent as game-database mutations or protocol credentials.
@@ -86,6 +94,11 @@ const (
 type ShoutIntent struct {
 	Channel ShoutChannel
 	Message string
+	// TargetCharacterID and TargetName address a directed message. A backend
+	// without a broadcast channel needs both: the target is what the message is
+	// delivered to, and the name is what the receiver is told about the sender.
+	TargetCharacterID uint16
+	TargetName        string
 }
 
 type RobotSession interface {

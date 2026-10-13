@@ -179,6 +179,8 @@ func (d protocolSessionDriver) SendOnline(users []shared.RuntimeOnlineUser) erro
 			EnablePartyAutoAccept:      backendPartyAutoAcceptEnabled(d.manager.backendInfo, rc),
 			EnablePartyFollow:          backendPartyFollowEnabled(d.manager.backendInfo, rc),
 			EnableDungeonRevive:        backendDungeonReviveEnabled(d.manager.backendInfo, rc),
+			EnableChatReply:            backendChatReplyEnabled(d.manager.backendInfo, rc),
+			ChatReplies:                d.manager.loadShoutTemplates().Messages,
 			InitialTownKnown:           true,
 			InitialVillage:             user.BirthVillage,
 			InitialArea:                user.BirthArea,
@@ -224,6 +226,13 @@ func backendPartyFollowEnabled(info shared.BackendInfo, rc robotconfig.RuntimeCo
 
 func backendDungeonReviveEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
 	return rc.AutoDungeonRevive && info.Supports(shared.CapabilityDungeonRevive)
+}
+
+// backendChatReplyEnabled reports whether new sessions should answer a directed
+// message from another character. A backend whose chat is directed rather than
+// broadcast still declares CapabilityShout, so that is the gate.
+func backendChatReplyEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
+	return rc.AutoChatReply && info.Supports(shared.CapabilityShout)
 }
 
 func (d protocolSessionDriver) closeOpened(uids []int) {

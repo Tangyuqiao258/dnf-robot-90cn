@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -154,6 +155,62 @@ func TestSimulatorVerifiedTownAndLocalShoutRemainAllowed(t *testing.T) {
 	}
 	if err := m.requireBackendCapability(shared.CapabilityShout); err != nil {
 		t.Fatalf("local shout unexpectedly unsupported: %v", err)
+	}
+}
+
+// TestDirectedShoutBackendRefusesATargetlessShout covers the backend whose
+// chat is enabled but point-to-point, which is what the 90CN adapter declares.
+// The capability check alone passes there, so without the mode the automatic
+// template turn would send a message with no target and be booked as a failure.
+func TestDirectedShoutBackendRefusesATargetlessShout(t *testing.T) {
+	m := testRobotManagerWithConfig(t, "")
+	info := testS4BackendInfo()
+	info.Capabilities[shared.CapabilityShout] = shared.CapabilityStatus{
+		Enabled: true, Mode: shared.ShoutModeDirected, Reason: "chat is delivered to a named character only",
+	}
+	m.SetBackendRobotCreator(info, nil)
+
+	var unsupported shared.UnsupportedCapabilityError
+	if err := m.requireBroadcastShout(); !errors.As(err, &unsupported) {
+		t.Fatalf("target-less shout error = %v, want an unsupported capability", err)
+	} else if unsupported.Reason == "" || !strings.Contains(unsupported.Reason, "chat is delivered to a named character only") {
+		t.Fatalf("target-less shout reason = %q", unsupported.Reason)
+	}
+	// The capability itself stays enabled: a caller that names a target is
+	// entitled to send.
+	if err := m.requireBackendCapability(shared.CapabilityShout); err != nil {
+		t.Fatalf("directed chat became unsupported: %v", err)
+	}
+	// Every entry point that holds a target-less intent has to refuse. The
+	// automatic turn reports its refusal as a cancelled action carrying the same
+	// message, so the assertion is on the reason the caller sees.
+	for name, run := range map[string]func() error{
+		"auto shout": func() error {
+			result := NewRobotRuntime(m).AutoShout(7, false, "hello")
+			if result.State != robotcap.ActionStateCancelled {
+				return fmt.Errorf("action was not cancelled: %+v", result)
+			}
+			return errors.New(result.Message)
+		},
+		"local shout command": func() error {
+			_, err := m.ShoutManaged(robotcap.CommandRequest{Count: 1}, false)
+			return err
+		},
+		"preferred shout command": func() error {
+			_, err := m.ShoutPreferredManaged(robotcap.CommandRequest{Count: 1})
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := run()
+			if err == nil {
+				t.Fatal("a target-less shout was accepted")
+			}
+			if !strings.Contains(err.Error(), shared.CodeBackendCapabilityUnsupported) ||
+				!strings.Contains(err.Error(), "operation="+string(shared.CapabilityShout)) {
+				t.Fatalf("error = %v, want the shout capability refusal", err)
+			}
+		})
 	}
 }
 

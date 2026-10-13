@@ -337,6 +337,11 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 	if !m.backendInfo.Supports(shared.CapabilityDungeonRevive) {
 		rc.AutoDungeonRevive = false
 	}
+	// The reply rides on the same directed-message transport as a shout, so a
+	// backend that cannot send one cannot answer one either.
+	if !m.backendInfo.Supports(shared.CapabilityShout) {
+		rc.AutoChatReply = false
+	}
 }
 
 func (m *RobotManager) publishRobotConfigLocked(path string, base robotconfig.RuntimeConfig, previous *robotConfigSnapshot) {
