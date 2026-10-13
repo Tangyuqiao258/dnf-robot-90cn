@@ -22,7 +22,7 @@ func Default() RuntimeConfig {
 		StoreConfirmTimeoutSec:   30,
 		StoreEnchantRatioPercent: 30,
 		FollowRadiusX:            120, FollowRadiusY: 30, ShoutDelayMS: 1000, ShoutSendEnabled: true,
-		AutoActions: true, AutoMailNotify: true, AutoSystemAnnouncement: true, AutoTargetOnlineCount: 20,
+		AutoActions: true, AutoMailNotify: true, AutoPartyAccept: true, AutoSystemAnnouncement: true, AutoTargetOnlineCount: 20,
 		AutoServerNotice:                false,
 		ServerNoticeRobotIntervalMinSec: 900,
 		ServerNoticeRobotIntervalMaxSec: 3600,

@@ -14,7 +14,7 @@ func TestMetadataReflectsVerifiedCapabilities(t *testing.T) {
 	for _, capability := range []shared.BackendCapability{
 		shared.CapabilityProvision, shared.CapabilityTownMove,
 		shared.CapabilityCleanup, shared.CapabilityDangerousDelete, shared.CapabilityDatabase,
-		shared.CapabilityStore,
+		shared.CapabilityStore, shared.CapabilityParty,
 	} {
 		if !info.Supports(capability) {
 			t.Fatalf("verified capability %s is disabled: %+v", capability, info.Capabilities[capability])
@@ -24,7 +24,7 @@ func TestMetadataReflectsVerifiedCapabilities(t *testing.T) {
 		t.Fatalf("database mode = %+v", info.Capabilities[shared.CapabilityDatabase])
 	}
 	for _, capability := range []shared.BackendCapability{
-		shared.CapabilityDungeonFollow, shared.CapabilityParty, shared.CapabilityGuildInvite,
+		shared.CapabilityDungeonFollow, shared.CapabilityGuildInvite,
 		shared.CapabilityShout,
 	} {
 		if info.Supports(capability) || info.Capabilities[capability].Reason == "" {

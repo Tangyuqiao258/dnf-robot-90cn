@@ -162,6 +162,9 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 		client: client, cancel: cancel, done: make(chan struct{}), keepaliveDone: make(chan struct{}),
 		selfCharacterID: selfCharacterID,
 	}
+	if request.EnablePartyAutoAccept {
+		session.startPartyAutoAccept(runCtx)
+	}
 	go session.drain(runCtx)
 	go session.keepalive(runCtx)
 	closeOnError = false
@@ -473,6 +476,71 @@ func (s *Session) signalTermination() {
 	if callback != nil {
 		callback()
 	}
+}
+
+// partyAutoAcceptQueue bounds the hand-off between the drain loop and the
+// responder goroutine. A full queue drops the prompt instead of blocking
+// packet dispatch.
+const partyAutoAcceptQueue = 8
+
+// partyAutoAcceptSendTimeout bounds one op11 acceptance write.
+const partyAutoAcceptSendTimeout = 5 * time.Second
+
+// startPartyAutoAccept answers forwarded party invite prompts for the whole
+// session. The observer only classifies and enqueues; a responder goroutine
+// performs the op11 write so a slow write never stalls the drain loop.
+// Forwarded peer requests that are not party invites (the mode-1 trade prompt
+// in particular) stay unanswered.
+func (s *Session) startPartyAutoAccept(ctx context.Context) {
+	if s == nil || s.client == nil || ctx == nil {
+		return
+	}
+	type partyInvite struct {
+		inviterID uint16
+		mode      byte
+		value     uint32
+	}
+	queue := make(chan partyInvite, partyAutoAcceptQueue)
+	cleanup := s.setPacketObserver(func(packet protocol.Packet) {
+		switch {
+		case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiRequestPeer:
+			notice, ok := protocol.ParseRequestPeerNotice(packet.Body)
+			if !ok {
+				return
+			}
+			value, isPartyInvite := protocol.PartyInviteAcceptValue(notice.Mode)
+			if !isPartyInvite {
+				return
+			}
+			select {
+			case queue <- partyInvite{inviterID: notice.SourceID, mode: notice.Mode, value: value}:
+				foundationlog.Robotf("CN90_PARTY_INVITE_RECEIVED cid=%d inviter=%d mode=%d\n", s.selfCharacterID, notice.SourceID, notice.Mode)
+			default:
+				foundationlog.Robotf("CN90_PARTY_INVITE_DROPPED cid=%d inviter=%d mode=%d\n", s.selfCharacterID, notice.SourceID, notice.Mode)
+			}
+		case packet.Class == protocol.ClassCommand && packet.Type == protocol.CmdResponsePeer:
+			ok, code := protocol.ResponsePeerResult(packet.Body)
+			foundationlog.Robotf("CN90_PARTY_RESPONSE_ACK cid=%d ok=%t code=%d\n", s.selfCharacterID, ok, code)
+		}
+	})
+	go func() {
+		defer cleanup()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case invite := <-queue:
+				sendCtx, cancel := context.WithTimeout(ctx, partyAutoAcceptSendTimeout)
+				err := s.client.ResponsePeer(sendCtx, invite.inviterID, invite.mode, invite.value)
+				cancel()
+				if err != nil {
+					foundationlog.Robotf("CN90_PARTY_ACCEPT_FAILED cid=%d inviter=%d mode=%d err=%v\n", s.selfCharacterID, invite.inviterID, invite.mode, err)
+					continue
+				}
+				foundationlog.Robotf("CN90_PARTY_ACCEPT_SENT cid=%d inviter=%d mode=%d value=%d\n", s.selfCharacterID, invite.inviterID, invite.mode, invite.value)
+			}
+		}
+	}()
 }
 
 // setPacketObserver is intentionally private to the 90CN adapter. It gives

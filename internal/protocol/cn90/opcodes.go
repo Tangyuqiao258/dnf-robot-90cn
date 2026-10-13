@@ -16,6 +16,8 @@ const (
 	CmdCreateCharacter    uint16 = 5
 	CmdDeleteCharacter    uint16 = 6
 	CmdGetUserInfo        uint16 = 8
+	CmdRequestPeer        uint16 = 10
+	CmdResponsePeer       uint16 = 11
 	CmdSetUserPosition    uint16 = 35
 	CmdSetUserArea        uint16 = 36
 	CmdChangeTutorial     uint16 = 143
@@ -34,6 +36,7 @@ const (
 	ResponseSelect          uint16 = 4
 	ResponseCreate          uint16 = 5
 	ResponseDelete          uint16 = 6
+	NotiRequestPeer         uint16 = 0x0007
 	NotiUserPosition        uint16 = 0x0016
 	NotiUserArea            uint16 = 0x0017
 	NotiSceneTransition     uint16 = 24

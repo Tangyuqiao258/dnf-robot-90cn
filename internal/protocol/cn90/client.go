@@ -212,6 +212,24 @@ func (c *Client) CloseExpertJobStore(ctx context.Context) error {
 	return c.send(ctx, CmdCloseExpertStore, nil)
 }
 
+// RequestPeer sends an op10 peer request. For the party invite modes the
+// server records the invitation and forwards a class0/NotiRequestPeer prompt
+// to the target; the class1 acknowledgement is observed by the session, not
+// read here.
+func (c *Client) RequestPeer(ctx context.Context, targetID uint16, mode byte, value0, value2 uint32) error {
+	body, err := RequestPeerBody(targetID, mode, value0, value2)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdRequestPeer, body)
+}
+
+// ResponsePeer answers a forwarded peer prompt with the exact seven-byte op11
+// shape. Party invites accept with value 0 (modes 0/12) or 1 (modes 4/13).
+func (c *Client) ResponsePeer(ctx context.Context, targetID uint16, mode byte, value uint32) error {
+	return c.send(ctx, CmdResponsePeer, ResponsePeerBody(targetID, mode, value))
+}
+
 // Read reads one inbound packet with cancellation support.
 func (c *Client) Read(ctx context.Context) (Packet, error) {
 	if c == nil || c.conn == nil {

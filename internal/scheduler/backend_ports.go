@@ -176,6 +176,7 @@ func (d protocolSessionDriver) SendOnline(users []shared.RuntimeOnlineUser) erro
 		if err := d.transport.Open(context.Background(), user.UID, shared.OpenSessionRequest{
 			AccountName: user.AccountName, PasswordHash: user.PasswordHash, CharacterSlot: uint16(user.CharacterSlot),
 			EnablePartyDungeonFollower: backendPartyFollowerEnabled(d.manager.backendInfo, rc),
+			EnablePartyAutoAccept:      backendPartyAutoAcceptEnabled(d.manager.backendInfo, rc),
 			InitialTownKnown:           true,
 			InitialVillage:             user.BirthVillage,
 			InitialArea:                user.BirthArea,
@@ -202,6 +203,14 @@ func backendPartyFollowerEnabled(info shared.BackendInfo, rc robotconfig.Runtime
 		return strings.TrimSpace(rc.FollowAccount) != ""
 	}
 	return true
+}
+
+// backendPartyAutoAcceptEnabled reports whether new sessions should answer
+// forwarded party invites. applyBackendConfigPolicy already clears the flag
+// for backends without the party capability; the capability check here keeps
+// a directly constructed config honest too.
+func backendPartyAutoAcceptEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
+	return rc.AutoPartyAccept && info.Supports(shared.CapabilityParty)
 }
 
 func (d protocolSessionDriver) closeOpened(uids []int) {

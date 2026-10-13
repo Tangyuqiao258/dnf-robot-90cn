@@ -71,6 +71,7 @@ type RuntimeConfig struct {
 	ShoutSendEnabled                bool   `json:"shout_send_enabled"`
 	AutoActions                     bool   `json:"auto_actions"`
 	AutoMailNotify                  bool   `json:"auto_mail_notify"`
+	AutoPartyAccept                 bool   `json:"auto_party_accept"`
 	AutoSystemAnnouncement          bool   `json:"auto_system_announcement"`
 	AutoServerNotice                bool   `json:"auto_server_notice"`
 	ServerNoticeRobotIntervalMinSec int    `json:"server_notice_robot_interval_min_sec"`

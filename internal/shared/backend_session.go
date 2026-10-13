@@ -10,6 +10,10 @@ type OpenSessionRequest struct {
 	// implement it with their own verified workflow or leave party following
 	// unsupported.
 	EnablePartyDungeonFollower bool
+	// EnablePartyAutoAccept makes the session answer forwarded party invite
+	// prompts (class0/0x0007) with the accepting op11 response. Backends
+	// without a party transport leave it unimplemented.
+	EnablePartyAutoAccept bool
 	// InitialTown* are robot-owned position metadata used by adapters that
 	// need to distinguish an in-area coordinate move from an area transition.
 	// They are not sent as game-database mutations or protocol credentials.
