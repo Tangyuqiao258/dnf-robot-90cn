@@ -12,6 +12,7 @@ import (
 	"time"
 
 	equipmentcap "robot/internal/capability/equipment"
+	"robot/internal/foundation/charset"
 	"robot/internal/shared"
 )
 
@@ -38,11 +39,37 @@ const (
 	cn90PetWornSourceListType = 3
 	cn90CreatureWornSlot      = 26
 	cn90CreatureSerial        = 1
+	// cn90CreatureNameRawLimit is the server's creature-name byte limit: both
+	// the pet state loader (pet/owner.go) and the body writer (pet/body.go)
+	// reject a name_raw of 30 bytes or more.
+	cn90CreatureNameRawLimit = 30
 )
 
 // cn90ArtifactKindByItemType maps the capability/pvf artifact item type to the
 // semantic kind stored by the server's PetRecord.
 var cn90ArtifactKindByItemType = map[int]string{31: "red", 32: "blue", 33: "green"}
+
+// buildCN90CreatureNameRaw encodes a creature name the way the 90CN wire
+// expects it: the client's GBK bytes, not the UTF-8 string. The server stores
+// name_raw opaquely, sends it verbatim to the client, and only falls back to
+// UTF-8 bytes of pet_name when name_raw is NULL -- a fallback rejected at 30
+// bytes, which every long Chinese name reaches (ten characters are 30 UTF-8
+// bytes but only 20 GBK bytes), leaving the character unable to log in with
+// "pet state is invalid: legacy_name_bytes=...". Writing the GBK bytes keeps
+// the row loadable and shows the same name in the client. A name whose GBK
+// form would still reach the limit is shortened on rune boundaries; an empty
+// result leaves the legacy NULL name and an unnamed creature.
+func buildCN90CreatureNameRaw(name string) []byte {
+	runes := []rune(name)
+	for len(runes) > 0 {
+		raw, err := charset.EncodeGBKString(string(runes))
+		if err == nil && len(raw) < cn90CreatureNameRawLimit {
+			return raw
+		}
+		runes = runes[:len(runes)-1]
+	}
+	return nil
+}
 
 // applyRobotPet replaces the character's creature state with a generated pet
 // and optional artifacts. A robot without a compatible creature keeps no pet
@@ -121,9 +148,9 @@ func (a *SQLiteLoadoutApplier) replacePetRows(ctx context.Context, tx *sql.Tx, c
 	// creature deliberately has no pet inventory row.
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO `+dnfPetEntriesTable+` (character_id, pet_key, creature_key, item_id, source_list_type, source_slot_index, pet_name, name_raw, satiety, satiety_micros, mode_flag, mode1_field_0a, mode1_field_0b, pet_level, pet_exp, tail_flag, raw_entry)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, 0, 0, ?, 0, 0, NULL)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, 0, 0, NULL)`,
 		characterID, petKey, serial, pet.ID, cn90PetWornSourceListType, cn90CreatureWornSlot,
-		pet.Name, cn90PetInitialSatiety, cn90PetInitialSatiety*cn90PetSatietyScale, cn90PetInitialLevel); err != nil {
+		pet.Name, buildCN90CreatureNameRaw(pet.Name), cn90PetInitialSatiety, cn90PetInitialSatiety*cn90PetSatietyScale, cn90PetInitialLevel); err != nil {
 		return fmt.Errorf("insert 90CN pet entry character=%s: %w", characterID, err)
 	}
 	petExtras := map[string]string{

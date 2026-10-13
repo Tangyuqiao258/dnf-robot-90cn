@@ -7,6 +7,7 @@ import (
 
 	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
+	"robot/internal/foundation/charset"
 	"robot/internal/shared"
 )
 
@@ -218,5 +219,74 @@ func TestRobotPetHonoursDisabledConfig(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("disabled pet config produced %d rows", count)
+	}
+}
+
+// TestRobotPetNameRawIsGBKUnderTheServerLimit pins the wire encoding of the
+// creature name. The 90CN server rejects a name_raw of 30 bytes or more and,
+// when name_raw is NULL, falls back to the UTF-8 bytes of pet_name -- which
+// every long Chinese creature name exceeds, keeping the character offline with
+// "pet state is invalid: key=1 legacy_name_bytes=32". The row must carry the
+// GBK bytes instead, shortened on rune boundaries when even GBK would reach
+// the limit.
+func TestRobotPetNameRawIsGBKUnderTheServerLimit(t *testing.T) {
+	cases := []struct {
+		name     string
+		wantKept string
+	}{
+		// 32 UTF-8 bytes, 23 GBK bytes: the exact shape observed live.
+		{name: "迷你战士宠物SS级 - 契约", wantKept: "迷你战士宠物SS级 - 契约"},
+		// 40 GBK bytes: must be shortened below the 30-byte wire limit.
+		{name: "迷迷你战士宠物SS级契约迷迷你战士宠物", wantKept: ""},
+	}
+	for _, tc := range cases {
+		path := newPetTestDatabase(t)
+		config := robotconfig.Default()
+		config.EquipSlots = []int{1}
+		config.AvatarSlots = []int{0}
+		config.MinAvatarSlots = 0
+		config.PetEnabled = true
+		config.PetProbabilityPercent = 100
+		config.PetArtifactEnabled = false
+		catalog := append(petTestCatalog(),
+			shared.EquipmentCatalogItem{ID: 60002, Name: tc.name, Path: "equipment/creature/long/long.equ", ItemType: 30, Level: 1, Rarity: 1})
+		applier, err := NewSQLiteLoadoutApplier(context.Background(), path, config, catalog, "", func(int) int { return 1 })
+		if err != nil {
+			t.Fatal(err)
+		}
+		db := openPurgeTestDatabase(t, path)
+		if err := applier.applyRobotPet(context.Background(), db, "9"); err != nil {
+			applier.Close()
+			db.Close()
+			t.Fatal(err)
+		}
+		var raw []byte
+		var itemID int
+		if err := db.QueryRow(`SELECT item_id, name_raw FROM dnf_pet_entries WHERE character_id='9' AND pet_key='1'`).Scan(&itemID, &raw); err != nil {
+			applier.Close()
+			db.Close()
+			t.Fatal(err)
+		}
+		applier.Close()
+		db.Close()
+		if itemID != 60002 {
+			t.Fatalf("case %q: pet item=%d, want the long-named creature", tc.name, itemID)
+		}
+		if len(raw) == 0 {
+			t.Fatalf("case %q: name_raw is NULL; the server would fall back to %d UTF-8 bytes and reject the character", tc.name, len(tc.name))
+		}
+		if len(raw) >= cn90CreatureNameRawLimit {
+			t.Fatalf("case %q: name_raw=%d bytes, over the server limit", tc.name, len(raw))
+		}
+		decoded := charset.DecodeWireName(raw)
+		if tc.wantKept != "" {
+			if decoded != tc.wantKept {
+				t.Fatalf("case %q: name_raw decodes to %q", tc.name, decoded)
+			}
+			continue
+		}
+		if decoded == "" || len([]rune(decoded)) >= len([]rune(tc.name)) {
+			t.Fatalf("case %q: over-long name was not shortened on rune boundaries: %q", tc.name, decoded)
+		}
 	}
 }
