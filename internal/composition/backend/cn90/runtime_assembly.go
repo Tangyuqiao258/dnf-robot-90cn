@@ -319,7 +319,8 @@ func resolveDatabasePath(serverLayout runtimeLayout, configured string) (string,
 
 // resolveChannelCatalog returns the dialable game ports. An explicit operator
 // override pins a single port; otherwise the runtime channel_info.etc defines
-// the per-channel game ports (10000 + channel id).
+// the channel list and the instance client.gamePortBase defines the ports
+// (gamePortBase + channel id).
 func resolveChannelCatalog(serverLayout runtimeLayout, configured int) (channelCatalog, string, error) {
 	if configured > 0 {
 		if configured > 65535 {
@@ -331,7 +332,11 @@ func resolveChannelCatalog(serverLayout runtimeLayout, configured int) (channelC
 	if serverIndex <= 0 {
 		serverIndex = 1
 	}
-	channels, err := loadChannelCatalog(serverLayout.root, serverLayout.instance.Game.ChannelInfoPath, serverIndex)
+	portBase := serverLayout.instance.Client.GamePortBase
+	if portBase <= 0 {
+		portBase = defaultNativeGamePortBase
+	}
+	channels, err := loadChannelCatalog(serverLayout.root, serverLayout.instance.Game.ChannelInfoPath, serverIndex, portBase)
 	if err != nil {
 		return channelCatalog{}, "", err
 	}

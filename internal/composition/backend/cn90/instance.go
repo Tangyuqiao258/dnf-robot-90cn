@@ -51,6 +51,11 @@ type serverInstance struct {
 		GameOuterToken  string `json:"gameOuterToken"`
 		ChannelServerID int    `json:"channelServerIndex"`
 	} `json:"protocol"`
+	Client struct {
+		Directory       string `json:"directory"`
+		GamePortBase    int    `json:"gamePortBase"`
+		InitialGamePort int    `json:"initialGamePort"`
+	} `json:"client"`
 }
 
 // runtimeLayout is the resolved runtime root plus the parsed instance.

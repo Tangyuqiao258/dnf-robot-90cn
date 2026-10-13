@@ -9,14 +9,15 @@ import (
 	"strings"
 )
 
-// The DNF90 server listens on one game port per channel: GamePortBase +
-// channel id (channelcatalog.GamePortBase = 10000). The channel list comes
-// from the runtime channel_info.etc, whose `[server] <id>` rows are
-// `channelID nameKey type areaKey ...`. The channel directory port
+// The DNF90 server listens on one game port per channel: the instance's
+// client.gamePortBase plus the channel id (the 90CN native default base is
+// 11000; the legacy S4A21 base of 10000 does not apply to this server). The
+// channel list comes from the runtime channel_info.etc, whose `[server] <id>`
+// rows are `channelID nameKey type areaKey ...`. The channel directory port
 // (server.channelListen) is a different protocol and must not be dialed.
 const (
-	gamePortBase       = 10000
-	defaultChannelFile = "data/dnf/channel_info.etc"
+	defaultNativeGamePortBase = 11000
+	defaultChannelFile        = "data/dnf/channel_info.etc"
 )
 
 type gameChannel struct {
@@ -38,7 +39,7 @@ func singlePortCatalog(port int) channelCatalog {
 
 // loadChannelCatalog reads the runtime channel_info.etc. The server index
 // selects the server group the launcher advertises (1 by default).
-func loadChannelCatalog(runtimeRoot, relativePath string, serverIndex int) (channelCatalog, error) {
+func loadChannelCatalog(runtimeRoot, relativePath string, serverIndex, portBase int) (channelCatalog, error) {
 	value := strings.TrimSpace(relativePath)
 	if value == "" {
 		value = defaultChannelFile
@@ -55,7 +56,7 @@ func loadChannelCatalog(runtimeRoot, relativePath string, serverIndex int) (chan
 	if err != nil {
 		return channelCatalog{}, fmt.Errorf("parse 90CN channel info %s: %w", path, err)
 	}
-	return rankChannelCatalog(channels), nil
+	return rankChannelCatalog(channels, portBase), nil
 }
 
 // parseChannelInfo implements the subset of the server's channel_info.etc
@@ -159,32 +160,36 @@ func splitChannelFields(line string) []string {
 	return fields
 }
 
+// isSpecialChannel classifies by area group only. The type column cannot be
+// used: this server marks the ordinary [granfloris] town channel as type 11,
+// which the inherited S4A21 type table treats as special, while the raid
+// groups (anton_raid, luke_raid) that must stay out of the pool carry types
+// that table never listed.
 func isSpecialChannel(channel gameChannel) bool {
-	switch channel.Group {
-	case "crack", "pvp", "trade", "deathtower", "raid", "attackraid", "attack_raid", "hiddenraid":
+	if strings.Contains(channel.Group, "raid") {
 		return true
 	}
-	switch channel.Type {
-	case 2, 3, 11, 13, 23, 24:
+	switch channel.Group {
+	case "crack", "pvp", "trade", "deathtower":
 		return true
 	}
 	return false
 }
 
 func isCrackChannel(channel gameChannel) bool {
-	return channel.Group == "crack" || channel.Type == 1
+	return channel.Group == "crack"
 }
 
 // rankChannelCatalog selects the dialable channel pool: ordinary resident
 // channels first, then the crack bootstrap channel, then any remaining
 // entrance. Robots never spread into PvP or raid entrances while a better
-// tier exists.
-func rankChannelCatalog(channels []gameChannel) channelCatalog {
+// tier exists. Ports are portBase + channel id.
+func rankChannelCatalog(channels []gameChannel, portBase int) channelCatalog {
 	normal := make([]int, 0, len(channels))
 	crack := make([]int, 0, len(channels))
 	other := make([]int, 0, len(channels))
 	for _, channel := range channels {
-		port := gamePortBase + channel.ID
+		port := portBase + channel.ID
 		switch {
 		case !isSpecialChannel(channel):
 			normal = append(normal, port)

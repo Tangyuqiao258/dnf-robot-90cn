@@ -54,7 +54,7 @@ func writeTestRuntime(t *testing.T, channelListen string) (projectRoot string, i
     "channelAdvertiseServerIndex": 0
   },
   "build": {"goExecutable": "go"},
-  "client": {"directory": "", "initialGamePort": 0, "hookCreate": true}
+  "client": {"directory": "", "gamePortBase": 11000, "initialGamePort": 11011, "hookCreate": true}
 }`
 	instancePath = filepath.Join(configDir, "instance.json")
 	if err := os.WriteFile(instancePath, []byte(instance), 0644); err != nil {
@@ -191,10 +191,10 @@ func TestResolveChannelCatalogUsesChannelInfoAndOverride(t *testing.T) {
 		t.Fatalf("catalog source = %q", source)
 	}
 	// The ordinary [cain] channel wins over the crack/pvp entrances.
-	if len(catalog.ports) != 1 || catalog.ports[0] != gamePortBase+3 {
+	if len(catalog.ports) != 1 || catalog.ports[0] != 11003 {
 		t.Fatalf("catalog ports = %v", catalog.ports)
 	}
-	if got := catalog.portForAccount("robot17000001", 0); got != gamePortBase+3 {
+	if got := catalog.portForAccount("robot17000001", 0); got != 11003 {
 		t.Fatalf("account port = %d", got)
 	}
 	if got := catalog.portForAccount("robot17000001", 0); got != catalog.portForAccount("robot17000001", 0) {
@@ -210,7 +210,7 @@ func TestResolveChannelCatalogUsesChannelInfoAndOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(crackCatalog.ports) != 2 || crackCatalog.ports[0] != gamePortBase+19 || crackCatalog.ports[1] != gamePortBase+251 {
+	if len(crackCatalog.ports) != 2 || crackCatalog.ports[0] != 11019 || crackCatalog.ports[1] != 11251 {
 		t.Fatalf("crack catalog ports = %v", crackCatalog.ports)
 	}
 
@@ -220,6 +220,72 @@ func TestResolveChannelCatalogUsesChannelInfoAndOverride(t *testing.T) {
 	}
 	if _, _, err := resolveChannelCatalog(serverLayout, 70000); err == nil {
 		t.Fatal("out-of-range override was accepted")
+	}
+}
+
+// TestResolveChannelCatalogClassifiesChannelsByAreaGroup pins the production
+// channel_info.etc shape: the ordinary [granfloris] town channel is type 11,
+// which the inherited S4A21 type table misreads as special, while the raid
+// groups carry types that table never listed. The pool must hold the single
+// ordinary channel, at gamePortBase + 11 (11011 on the live server).
+func TestResolveChannelCatalogClassifiesChannelsByAreaGroup(t *testing.T) {
+	projectRoot, _ := writeTestRuntime(t, "127.0.0.1:7001")
+	channelInfo := "[server] 1\n" +
+		"   11   `<chn_channel_info_002>`   11  `[granfloris]`   0 \n" +
+		"   19   `<chn_channel_info_046>`   1   `[crack]`        0 \n" +
+		"   251  `<chn_channel_info_046>`   40  `[crack]`        0 \n" +
+		"   501  `<chn_channel_info_039>`   13  `[pvp]`          0 \n" +
+		"   252  `<chn_channel_info_039>`   8   `[pvp]`          0 \n" +
+		"   221  `<chn_channel_info_047>`   23  `[anton_raid]`   0 \n" +
+		"   241  `<chn_channel_info_048>`   32  `[luke_raid]`    0 \n" +
+		"[/server]\n"
+	if err := os.WriteFile(filepath.Join(projectRoot, projectRuntimeDirName, "data", "dnf", "channel_info.etc"), []byte(channelInfo), 0644); err != nil {
+		t.Fatal(err)
+	}
+	serverLayout, err := resolveRuntimeLayout(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, _, err := resolveChannelCatalog(serverLayout, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.ports) != 1 || catalog.ports[0] != 11011 {
+		t.Fatalf("catalog ports = %v, want [11011]", catalog.ports)
+	}
+}
+
+// TestResolveChannelCatalogFollowsInstanceGamePortBase checks the channel
+// ports follow client.gamePortBase instead of a hardcoded base, and that a
+// runtime predating the field falls back to the native default base.
+func TestResolveChannelCatalogFollowsInstanceGamePortBase(t *testing.T) {
+	projectRoot, _ := writeTestRuntime(t, "127.0.0.1:7001")
+	channelInfo := "[server] 1\n" +
+		"   3    `<chn_channel_info_001>`   0   `[cain]`    0 \n" +
+		"[/server]\n"
+	if err := os.WriteFile(filepath.Join(projectRoot, projectRuntimeDirName, "data", "dnf", "channel_info.etc"), []byte(channelInfo), 0644); err != nil {
+		t.Fatal(err)
+	}
+	serverLayout, err := resolveRuntimeLayout(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverLayout.instance.Client.GamePortBase = 12000
+	catalog, _, err := resolveChannelCatalog(serverLayout, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.ports) != 1 || catalog.ports[0] != 12003 {
+		t.Fatalf("catalog ports = %v, want [12003]", catalog.ports)
+	}
+
+	serverLayout.instance.Client.GamePortBase = 0
+	catalog, _, err = resolveChannelCatalog(serverLayout, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.ports) != 1 || catalog.ports[0] != 11003 {
+		t.Fatalf("fallback catalog ports = %v, want [11003]", catalog.ports)
 	}
 }
 
