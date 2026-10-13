@@ -141,6 +141,150 @@ func TestMailboxAckResultReadsEnvelope(t *testing.T) {
 	}
 }
 
+func TestMailboxExtractResultReadsClaimedRows(t *testing.T) {
+	// The server's own buildExtractAck layout for one gold row and one
+	// attachment row: {0x01, u32 count, count * (u32 mail, u32 claim, u32 status)}.
+	body := []byte{
+		0x01, 0x02, 0x00, 0x00, 0x00,
+		0x11, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x11, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	claimed, err := MailboxExtractResult(body)
+	if err != nil {
+		t.Fatalf("MailboxExtractResult error = %v", err)
+	}
+	if len(claimed) != 2 {
+		t.Fatalf("claimed rows = %d, want 2", len(claimed))
+	}
+	if claimed[0] != (MailboxClaimResult{MailID: 0x11, ClaimObjectID: 0x11}) {
+		t.Fatalf("gold row = %+v", claimed[0])
+	}
+	if claimed[1] != (MailboxClaimResult{MailID: 0x11, ClaimObjectID: 0x22}) {
+		t.Fatalf("attachment row = %+v", claimed[1])
+	}
+}
+
+func TestMailboxExtractResultReadsThePerObjectStatus(t *testing.T) {
+	// The status is the low word of the trailing u32; the high word is reserved
+	// and must not be folded into it.
+	body := []byte{0x01, 0x01, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00}
+	claimed, err := MailboxExtractResult(body)
+	if err != nil {
+		t.Fatalf("MailboxExtractResult error = %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].Status != 4 {
+		t.Fatalf("claimed = %+v, want one row with status 4", claimed)
+	}
+}
+
+func TestMailboxExtractResultRejectsRejectionAndDamage(t *testing.T) {
+	if _, err := MailboxExtractResult([]byte{0x00, 0x04}); err == nil {
+		t.Fatal("a rejected extract was parsed as success")
+	}
+	// A row count that disagrees with the body is damage, not a partial result.
+	if _, err := MailboxExtractResult([]byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}); err == nil {
+		t.Fatal("a truncated row list was accepted")
+	}
+	if _, err := MailboxExtractResult([]byte{0x01}); err == nil {
+		t.Fatal("a success envelope with no count was accepted")
+	}
+	if _, err := MailboxExtractResult(append([]byte{0x01, 0x01, 0x00, 0x00, 0x00}, make([]byte, 13)...)); err == nil {
+		t.Fatal("a padded row list was accepted")
+	}
+}
+
+func TestMailboxExtractResultRefusesAnOversizedRowCount(t *testing.T) {
+	// A corrupted length must not become an allocation: the server never
+	// answers with more rows than MailboxBatchLimit.
+	body := []byte{0x01, 0xff, 0xff, 0xff, 0xff}
+	if _, err := MailboxExtractResult(body); err == nil {
+		t.Fatal("an oversized row count was accepted")
+	}
+}
+
+// mailboxTestSnapshotOf builds a snapshot from summary values, skipping the
+// wire encoding: these two projections read fields, not bytes.
+func mailboxTestSnapshotOf(summaries ...MailboxSummary) MailboxSnapshot {
+	return MailboxSnapshot{Summaries: summaries}
+}
+
+func TestMailboxClaimableIDsSkipsEmptyReceiptRows(t *testing.T) {
+	snapshot := mailboxTestSnapshotOf(
+		// A letter with one attachment: the attachment row is the claim target.
+		MailboxSummary{ClaimObjectID: 7001, MailID: 55, ItemID: 2600021, HasItem: true, ItemCount: 3},
+		// A second attachment of the same letter: another claim target, and the
+		// only one carrying the letter's gold.
+		MailboxSummary{ClaimObjectID: 7002, MailID: 55, ItemID: 2600022, HasItem: true, ItemCount: 1, Gold: 500},
+		// A gold-only letter: the claim object is the letter's own wire id.
+		MailboxSummary{ClaimObjectID: 56, Gold: 1200},
+		// An empty receipt: a claimed letter or a text-only one. Neither has
+		// anything to hand over, so it must not be offered.
+		MailboxSummary{ClaimObjectID: 57},
+	)
+	got := MailboxClaimableIDs(snapshot)
+	want := []uint32{7001, 7002, 56}
+	if len(got) != len(want) {
+		t.Fatalf("claimable = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("claimable = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMailboxClaimableIDsDropsDuplicatesAndZeroIDs(t *testing.T) {
+	got := MailboxClaimableIDs(mailboxTestSnapshotOf(
+		MailboxSummary{ClaimObjectID: 7001, HasItem: true},
+		MailboxSummary{ClaimObjectID: 7001, HasItem: true},
+		MailboxSummary{ClaimObjectID: 0, HasItem: true},
+	))
+	if len(got) != 1 || got[0] != 7001 {
+		t.Fatalf("claimable = %v, want [7001]", got)
+	}
+	if empty := MailboxClaimableIDs(MailboxSnapshot{}); len(empty) != 0 {
+		t.Fatalf("empty snapshot claimable = %v, want none", empty)
+	}
+}
+
+func TestMailboxDrainedIDsNamesLettersByEitherField(t *testing.T) {
+	snapshot := mailboxTestSnapshotOf(
+		// A letter with a pending attachment is not drained, however many rows
+		// it spreads over.
+		MailboxSummary{ClaimObjectID: 7001, MailID: 55, HasItem: true},
+		MailboxSummary{ClaimObjectID: 7002, MailID: 55, HasItem: true},
+		// A letter whose only row is a receipt carries its id in the claim
+		// object field instead, because the mail field is zero there.
+		MailboxSummary{ClaimObjectID: 56},
+		// A text-only letter is projected the same way and is reported too; the
+		// caller decides whether to delete it.
+		MailboxSummary{ClaimObjectID: 57},
+		// A letter that only holds gold is still pending.
+		MailboxSummary{ClaimObjectID: 58, Gold: 1200},
+	)
+	got := MailboxDrainedIDs(snapshot)
+	want := []uint32{56, 57}
+	if len(got) != len(want) {
+		t.Fatalf("drained = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("drained = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMailboxDrainedIDsStaysEmptyWhileAnythingIsPending(t *testing.T) {
+	// A claimed attachment and a pending gold row on the same letter: the
+	// settled row must not mark the letter drained while the gold is unclaimed.
+	got := MailboxDrainedIDs(mailboxTestSnapshotOf(
+		MailboxSummary{ClaimObjectID: 7001, MailID: 55, Gold: 900},
+	))
+	if len(got) != 0 {
+		t.Fatalf("drained = %v, want none while the gold is unclaimed", got)
+	}
+}
+
 func TestMailboxAlarmCountReadsTheTwoByteWord(t *testing.T) {
 	// The server's own BuildAlarmNotification(513) vector.
 	count, ok := MailboxAlarmCount([]byte{0x01, 0x02})

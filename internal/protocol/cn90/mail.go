@@ -213,6 +213,119 @@ func MailboxOpenResult(body []byte) (notLoaded uint16, ok bool, code byte) {
 	return 0, false, 0
 }
 
+// MailboxClaimResult is one 12-byte row of the op95 acknowledgement. The server
+// writes the settled letter's wire id, the claim-object id that was asked for,
+// and a trailing u32 whose low word is the per-object status -- zero for a
+// successful extraction.
+type MailboxClaimResult struct {
+	MailID        uint32
+	ClaimObjectID uint32
+	Status        uint16
+}
+
+// MailboxExtractResult parses the op95 success body `{0x01, u32 n, n*12}`.
+//
+// The row count is checked against MailboxBatchLimit before allocating: the
+// server never answers with more rows than the request carried ids, and a
+// corrupted length must not turn into an unbounded allocation.
+func MailboxExtractResult(body []byte) ([]MailboxClaimResult, error) {
+	r := wireReader{body: body}
+	if r.byte() != 1 {
+		code := byte(0)
+		if len(body) >= 2 {
+			code = body[1]
+		}
+		return nil, fmt.Errorf("cn90 mailbox extract failed with code %d", code)
+	}
+	count := int(r.u32())
+	if r.err != nil {
+		return nil, fmt.Errorf("cn90 mailbox extract reply is truncated: %v", r.err)
+	}
+	if count > MailboxBatchLimit {
+		return nil, fmt.Errorf("cn90 mailbox extract reply claims %d objects, above the %d accepted per request", count, MailboxBatchLimit)
+	}
+	claimed := make([]MailboxClaimResult, 0, count)
+	for i := 0; i < count; i++ {
+		var row MailboxClaimResult
+		row.MailID = r.u32()
+		row.ClaimObjectID = r.u32()
+		// The status is the low word of a u32 whose high word is reserved.
+		row.Status = uint16(r.u32())
+		claimed = append(claimed, row)
+	}
+	if r.err != nil {
+		return nil, fmt.Errorf("cn90 mailbox extract reply: %v", r.err)
+	}
+	if r.remaining() != 0 {
+		return nil, fmt.Errorf("cn90 mailbox extract reply has %d trailing bytes", r.remaining())
+	}
+	return claimed, nil
+}
+
+// MailboxClaimableIDs lists the claim-object ids a snapshot offers: one per
+// attachment row, and the letter's own wire id for a row that carries only
+// gold. Duplicates are dropped and the snapshot's own order is kept.
+//
+// The server projects a letter with nothing to hand over as a single empty
+// receipt row, so a row carrying neither an item nor gold is never offered
+// here. The caller must still batch the result: one snapshot may offer more
+// ids than op95 accepts at once.
+func MailboxClaimableIDs(snapshot MailboxSnapshot) []uint32 {
+	ids := make([]uint32, 0, len(snapshot.Summaries))
+	seen := make(map[uint32]struct{}, len(snapshot.Summaries))
+	for _, summary := range snapshot.Summaries {
+		if !summary.HasItem && summary.Gold == 0 {
+			continue
+		}
+		if summary.ClaimObjectID == 0 {
+			continue
+		}
+		if _, duplicate := seen[summary.ClaimObjectID]; duplicate {
+			continue
+		}
+		seen[summary.ClaimObjectID] = struct{}{}
+		ids = append(ids, summary.ClaimObjectID)
+	}
+	return ids
+}
+
+// MailboxDrainedIDs lists the wire mail ids of the letters a snapshot shows
+// with nothing left to claim.
+//
+// A letter is named by its own wire id, which the server writes into the
+// summary's mail field -- except on the empty receipt row it writes for a
+// letter with nothing to hand over, where that field is zero and the id moves
+// to the claim-object field. Both shapes are read here. The result therefore
+// also names text-only letters, which were never claimable in the first place;
+// the caller decides whether deleting those is what it wants.
+func MailboxDrainedIDs(snapshot MailboxSnapshot) []uint32 {
+	holdsContent := make(map[uint32]bool, len(snapshot.Summaries))
+	order := make([]uint32, 0, len(snapshot.Summaries))
+	for _, summary := range snapshot.Summaries {
+		id := summary.MailID
+		if id == 0 {
+			id = summary.ClaimObjectID
+		}
+		if id == 0 {
+			continue
+		}
+		if _, listed := holdsContent[id]; !listed {
+			order = append(order, id)
+			holdsContent[id] = false
+		}
+		if summary.HasItem || summary.Gold > 0 {
+			holdsContent[id] = true
+		}
+	}
+	drained := make([]uint32, 0, len(order))
+	for _, id := range order {
+		if !holdsContent[id] {
+			drained = append(drained, id)
+		}
+	}
+	return drained
+}
+
 // MailboxAlarmCount reads a class0/0x63 new-mail alarm: the body is exactly one
 // u16 unread count. The server pushes a zero count as a reset and the real
 // count once the town scene tail is ready.

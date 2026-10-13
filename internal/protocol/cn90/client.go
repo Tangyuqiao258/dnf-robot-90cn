@@ -230,6 +230,42 @@ func (c *Client) ResponsePeer(ctx context.Context, targetID uint16, mode byte, v
 	return c.send(ctx, CmdResponsePeer, ResponsePeerBody(targetID, mode, value))
 }
 
+// MailboxOpen opens the session's mailbox (class1/op96). The body must be
+// empty. The server answers twice: the class1 acknowledgement carries the
+// not-loaded count, and a class0/0x61 notification carries the whole snapshot.
+// Both are observed by the session.
+func (c *Client) MailboxOpen(ctx context.Context) error {
+	return c.send(ctx, CmdMailboxOpen, MailboxOpenBody())
+}
+
+// MailboxClaim extracts attachments by claim-object id (class1/op95). The ids
+// come from a class0/0x61 snapshot: one per attachment row, and the letter's
+// own wire id for a row that only carries gold. The server moves what fits into
+// the character's bag and answers with the rows it settled.
+//
+// A letter whose contents are already gone is skipped rather than rejected, so
+// a batch that mixes claimed and pending objects still succeeds; the server
+// only reports failure when nothing in the batch was left to claim.
+func (c *Client) MailboxClaim(ctx context.Context, claimObjectIDs []uint32) error {
+	body, err := MailboxExtractBody(claimObjectIDs)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdMailboxExtractItem, body)
+}
+
+// MailboxChangeState rewrites the state of the named letters (class1/op134).
+// Status 0 deletes the letters and makes the server push class0/0x62 for each,
+// 2 marks them read and 3 saves them. Claiming does not remove a letter, so
+// deletion is what keeps a robot's mailbox from growing without bound.
+func (c *Client) MailboxChangeState(ctx context.Context, mailIDs []uint32, status uint16) error {
+	body, err := MailboxChangeStateBody(mailIDs, status)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, CmdChangeLetterStat, body)
+}
+
 // AuctionRegister lists one inventory stack (class1/op183). The acknowledgement
 // is observed by the session: op183 answers as both the register result and the
 // class0 service-open notice, so the two are told apart by packet class.
