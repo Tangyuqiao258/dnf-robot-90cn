@@ -74,7 +74,18 @@ type Session struct {
 	termination        func()
 	// follow is the party leader tracker, created only for a session opened
 	// with EnablePartyFollow.
-	follow          *partyFollowState
+	follow *partyFollowState
+	// dungeon tracks the active run and the character's death state.
+	dungeon *dungeonState
+	// townPosition is the last town coordinate the server was told about. A
+	// dungeon entry is refused while the return origin has no position report
+	// behind it in the current town scene, so the entry re-reports this before
+	// it opens the selector.
+	townPosition *townPositionState
+	// reviveQueue carries death notices to the revive worker. It is nil unless
+	// the session was opened with EnableDungeonRevive, which is what keeps the
+	// observer from queueing work nobody will send.
+	reviveQueue     chan struct{}
 	selfCharacterID uint16
 	keepaliveGuard  lockhub.Locker
 	lastCheckAck    time.Time
@@ -152,12 +163,15 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	if err := client.TownSceneReady(openCtx); err != nil {
 		foundationlog.Robotf("CN90_SCENE_READY_FAILED err=%v\n", err)
 	}
+	townPositionKnown := false
 	if request.InitialTownKnown {
 		if err := initializeTownPresence(openCtx, client, request); err != nil {
 			// The persisted login location is owned by the server. A spawn
 			// request that does not match it is rejected server-side; keep the
 			// session online instead of failing the whole login.
 			foundationlog.Robotf("CN90_TOWN_PRESENCE_DEFERRED err=%v\n", err)
+		} else {
+			townPositionKnown = true
 		}
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -165,11 +179,27 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 		client: client, cancel: cancel, done: make(chan struct{}), keepaliveDone: make(chan struct{}),
 		selfCharacterID: selfCharacterID,
 	}
+	// The entry presence above reported a coordinate with op36, which is a
+	// scene transition rather than a coordinate report: the server accepts it
+	// but keeps no op35 position for the new scene. Recording it is still what
+	// the entry has to re-report, because it is where the character stands.
+	if townPositionKnown {
+		session.townPosition = &townPositionState{}
+		session.townPosition.mark(int16(request.InitialX), int16(request.InitialY), 0, 0)
+	}
 	if request.EnablePartyAutoAccept {
 		session.startPartyAutoAccept(runCtx)
 	}
 	if request.EnablePartyFollow {
 		session.startPartyFollow(runCtx)
+	}
+	// The run and death state is tracked for every session: it is what tells the
+	// runtime whether a dungeon command is meaningful at all, and recording it
+	// costs nothing. Only the revive worker writes to the socket, and only when
+	// the request asked for it.
+	session.startDungeonTracking(runCtx)
+	if request.EnableDungeonRevive {
+		session.startDungeonRevive(runCtx)
 	}
 	go session.drain(runCtx)
 	go session.keepalive(runCtx)
@@ -258,7 +288,24 @@ func waitUpperPacket(ctx context.Context, client *protocol.Client, class byte, t
 }
 
 func (s *Session) MoveTown(ctx context.Context, intent shared.TownMoveIntent) error {
-	return s.client.SetUserPosition(ctx, intent.X, intent.Y, intent.Direction, intent.Motion)
+	if err := s.client.SetUserPosition(ctx, intent.X, intent.Y, intent.Direction, intent.Motion); err != nil {
+		return err
+	}
+	s.rememberTownPosition(intent.X, intent.Y, intent.Direction, intent.Motion)
+	return nil
+}
+
+// rememberTownPosition records the coordinate the server has just been told
+// about. A dungeon entry re-reports it, so a move that failed to send must not
+// be remembered.
+func (s *Session) rememberTownPosition(x, y int16, direction byte, motion uint16) {
+	if s == nil {
+		return
+	}
+	if s.townPosition == nil {
+		s.townPosition = &townPositionState{}
+	}
+	s.townPosition.mark(x, y, direction, motion)
 }
 
 func (s *Session) MoveTownArea(ctx context.Context, intent shared.TownAreaMoveIntent) error {

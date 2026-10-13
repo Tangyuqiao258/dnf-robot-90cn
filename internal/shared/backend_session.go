@@ -22,6 +22,11 @@ type OpenSessionRequest struct {
 	// follower toward it. Backends without a party transport leave it
 	// unimplemented.
 	EnablePartyFollow bool
+	// EnableDungeonRevive makes the session answer the server's death notice
+	// with a revive request, so a character that died inside a run is not
+	// returned to town by the server's ten second timer. Backends without a
+	// dungeon transport leave it unimplemented.
+	EnableDungeonRevive bool
 	// InitialTown* are robot-owned position metadata used by adapters that
 	// need to distinguish an in-area coordinate move from an area transition.
 	// They are not sent as game-database mutations or protocol credentials.

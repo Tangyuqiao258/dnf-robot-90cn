@@ -157,6 +157,34 @@ func (c *Client) ChangeEmotion(ctx context.Context, emotionIndex uint16) error {
 	return c.send(ctx, CmdChangeEmotion, ChangeEmotionBody(emotionIndex))
 }
 
+// EnterDungeonSelect opens the dungeon selector. The server ignores the body
+// and answers with the selector context; that reply is what binds the
+// character's current town position as the return origin a later entry needs,
+// so it has to be sent once the character has a valid town position.
+func (c *Client) EnterDungeonSelect(ctx context.Context) error {
+	return c.send(ctx, CmdEnterSelectDungeon, nil)
+}
+
+// SelectDungeon commits a dungeon entry. The server makes the run active
+// before it answers, so a successful acknowledgement means the dungeon is
+// already running.
+func (c *Client) SelectDungeon(ctx context.Context, dungeonID uint32, difficulty byte) error {
+	return c.send(ctx, CmdSelectDungeon, SelectDungeonBody(dungeonID, difficulty))
+}
+
+// DeclareDeath reports the character as dead. Death is client-declared in this
+// protocol generation; the server arms a ten second timer that returns the
+// character to town unless a revive arrives first.
+func (c *Client) DeclareDeath(ctx context.Context, x, y int16) error {
+	return c.send(ctx, CmdDieCharacter, DieCharacterBody(x, y))
+}
+
+// UseCoin asks the server to revive the acting character. It is only accepted
+// while the death timer is armed.
+func (c *Client) UseCoin(ctx context.Context, objectKey uint16) error {
+	return c.send(ctx, CmdUseCoin, UseCoinBody(objectKey))
+}
+
 // TownSceneReady sends the legacy type1345 u32(2) acknowledgement the live
 // client emits right after the first typed op24. The server uses it to release
 // the deferred scene tail and the HUD gauges.

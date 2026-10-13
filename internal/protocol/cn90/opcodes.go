@@ -18,8 +18,12 @@ const (
 	CmdGetUserInfo        uint16 = 8
 	CmdRequestPeer        uint16 = 10
 	CmdResponsePeer       uint16 = 11
+	CmdEnterSelectDungeon uint16 = 15
+	CmdSelectDungeon      uint16 = 16
 	CmdSetUserPosition    uint16 = 35
 	CmdSetUserArea        uint16 = 36
+	CmdDieCharacter       uint16 = 40
+	CmdUseCoin            uint16 = 41
 	CmdMailboxSend        uint16 = 94
 	CmdMailboxExtractItem uint16 = 95
 	CmdMailboxOpen        uint16 = 96
@@ -58,9 +62,17 @@ const (
 	NotiUserPosition    uint16 = 0x0016
 	NotiUserArea        uint16 = 0x0017
 	NotiSceneTransition uint16 = 24
-	NotiMailboxList     uint16 = 0x0061
-	NotiMailboxRemove   uint16 = 0x0062
-	NotiMailboxAlarm    uint16 = 0x0063
+	// NotiDungeonInfo and NotiDungeonStartMap are pushed class-0 once the
+	// server has already made the run active; they are how a session learns it
+	// is inside a dungeon, not a precondition for entering one.
+	NotiDungeonInfo     uint16 = 28
+	NotiDungeonStartMap uint16 = 29
+	// NotiDungeonDeathState carries the acting session's own death and revive
+	// notices. The server never sends it to anyone else.
+	NotiDungeonDeathState uint16 = 32
+	NotiMailboxList       uint16 = 0x0061
+	NotiMailboxRemove     uint16 = 0x0062
+	NotiMailboxAlarm      uint16 = 0x0063
 	// NotiAuctionService shares the number with CmdAuctionRegister, but on the
 	// other side of the session: the server pushes it as a class-0 notification
 	// with the two-byte bodies {0,1} and {1,1} once per session, at the first

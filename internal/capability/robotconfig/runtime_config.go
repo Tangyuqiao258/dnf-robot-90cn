@@ -100,6 +100,7 @@ type RuntimeConfig struct {
 	AutoMailNotify                  bool   `json:"auto_mail_notify"`
 	AutoPartyAccept                 bool   `json:"auto_party_accept"`
 	AutoPartyFollow                 bool   `json:"auto_party_follow"`
+	AutoDungeonRevive               bool   `json:"auto_dungeon_revive"`
 	AutoSystemAnnouncement          bool   `json:"auto_system_announcement"`
 	AutoServerNotice                bool   `json:"auto_server_notice"`
 	ServerNoticeRobotIntervalMinSec int    `json:"server_notice_robot_interval_min_sec"`

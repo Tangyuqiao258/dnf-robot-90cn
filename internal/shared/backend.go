@@ -16,6 +16,7 @@ const (
 	CapabilityTownMove           BackendCapability = "town_move"
 	CapabilityDungeonMove        BackendCapability = "dungeon_move"
 	CapabilityDungeonFollow      BackendCapability = "dungeon_follow"
+	CapabilityDungeonRevive      BackendCapability = "dungeon_revive"
 	CapabilityShout              BackendCapability = "shout"
 	CapabilityWorldShout         BackendCapability = "world_shout"
 	CapabilityStore              BackendCapability = "store"

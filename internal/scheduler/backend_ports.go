@@ -178,6 +178,7 @@ func (d protocolSessionDriver) SendOnline(users []shared.RuntimeOnlineUser) erro
 			EnablePartyDungeonFollower: backendPartyFollowerEnabled(d.manager.backendInfo, rc),
 			EnablePartyAutoAccept:      backendPartyAutoAcceptEnabled(d.manager.backendInfo, rc),
 			EnablePartyFollow:          backendPartyFollowEnabled(d.manager.backendInfo, rc),
+			EnableDungeonRevive:        backendDungeonReviveEnabled(d.manager.backendInfo, rc),
 			InitialTownKnown:           true,
 			InitialVillage:             user.BirthVillage,
 			InitialArea:                user.BirthArea,
@@ -219,6 +220,10 @@ func backendPartyAutoAcceptEnabled(info shared.BackendInfo, rc robotconfig.Runti
 // transport as auto-accept, so it is gated by the same capability.
 func backendPartyFollowEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
 	return rc.AutoPartyFollow && info.Supports(shared.CapabilityParty)
+}
+
+func backendDungeonReviveEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
+	return rc.AutoDungeonRevive && info.Supports(shared.CapabilityDungeonRevive)
 }
 
 func (d protocolSessionDriver) closeOpened(uids []int) {
