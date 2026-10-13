@@ -17,14 +17,14 @@ func Info() shared.BackendInfo {
 	capabilities[shared.CapabilityCleanup] = shared.CapabilityStatus{Enabled: true, Reason: "verified roster deletion protocol; live verified"}
 	capabilities[shared.CapabilityDangerousDelete] = shared.CapabilityStatus{Enabled: true, Reason: "adapter-owned SQLite purge over the dnf_* tables; live verified (1197-account fleet purge, zero orphan rows)"}
 	capabilities[shared.CapabilityPartyDebug] = shared.CapabilityStatus{Reason: "90CN party diagnostics are not implemented"}
-	capabilities[shared.CapabilityMailNotification] = shared.CapabilityStatus{Enabled: true, Reason: "per-robot mailbox round: op96 opens the box (class1 ack plus the class0 snapshot), op95 claims every attachment the snapshot offers and op134 status 0 deletes the letters the round drained, so a robot collects its auction settlement instead of letting the box grow; protocol and session layers unit tested, live verification pending"}
+	capabilities[shared.CapabilityMailNotification] = shared.CapabilityStatus{Enabled: true, Reason: "per-robot mailbox round: op96 opens the box (class1 ack plus the class0 snapshot), op95 claims every attachment the snapshot offers and op134 status 0 deletes the letters the round drained, so a robot collects its auction settlement instead of letting the box grow; live verified end to end against the auction settlement mail"}
 	capabilities[shared.CapabilityDatabase] = shared.CapabilityStatus{Enabled: true, Mode: "sqlite_health", Reason: "validates the dnf_* schema of the configured SQLite file; live verified"}
 	capabilities[shared.CapabilityDiagnostics] = shared.CapabilityStatus{Reason: "90CN diagnostics are not implemented"}
 	capabilities[shared.CapabilitySystemAnnouncement] = shared.CapabilityStatus{Reason: "the DNF90 server implements no announcement broadcast"}
 	capabilities[shared.CapabilityServerNotice] = shared.CapabilityStatus{Reason: "the DNF90 server implements no notice broadcast: op477 has no handler and op503 is a passive client report; no admin broadcast route exists"}
 	capabilities[shared.CapabilityServiceControl] = shared.CapabilityStatus{Reason: "90CN service control is not implemented"}
 	capabilities[shared.CapabilityDungeonMove] = shared.CapabilityStatus{Reason: "90CN dungeon movement is not implemented"}
-	capabilities[shared.CapabilityMarket] = shared.CapabilityStatus{Enabled: true, Reason: "buyout-only listings (op183 register with the no-start-price sentinel) placed from the offline-seeded bag stock, and purchases of player listings under the price model (op186/op187 browse, op334 piece buy); a character's own listings are read back with op188"}
+	capabilities[shared.CapabilityMarket] = shared.CapabilityStatus{Enabled: true, Reason: "buyout-only listings (op183 register with the no-start-price sentinel) placed from the offline-seeded bag stock, and purchases of player listings under the price model (op186/op187 browse, op334 piece buy); a character's own listings are read back with op188; listing, purchase and the settlement-mail claim are live verified"}
 	return shared.BackendInfo{
 		ID: BackendID, DisplayName: "90CN", SupportedOS: []string{"linux", "windows"}, Selectable: true,
 		Capabilities: capabilities, MaxOnline: 10000,
