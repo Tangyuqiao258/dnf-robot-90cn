@@ -24,6 +24,7 @@ func Default() RuntimeConfig {
 		AuctionEnabled:           true, AuctionStockStacks: 6, AuctionStockGold: 2000000, AuctionListPerRobot: 3,
 		AuctionListUnitPercent: 130, AuctionBuyEnabled: true, AuctionBuyUnitPercent: 100, AuctionBuyMaxTotal: 500000,
 		AuctionIntervalMinSec: 300, AuctionIntervalMaxSec: 900,
+		MailEnabled: true, MailIntervalMinSec: 300, MailIntervalMaxSec: 900,
 		FollowRadiusX: 120, FollowRadiusY: 30, ShoutDelayMS: 1000, ShoutSendEnabled: true,
 		AutoActions: true, AutoMailNotify: true, AutoPartyAccept: true, AutoSystemAnnouncement: true, AutoTargetOnlineCount: 20,
 		AutoServerNotice:                false,
@@ -68,6 +69,7 @@ func Normalize(rc *RuntimeConfig) {
 	normalizeSystemDefaults(rc)
 	normalizeStoreEconomy(rc)
 	normalizeAuction(rc)
+	normalizeMail(rc)
 	normalizeSpawnDefaults(rc)
 }
 
@@ -125,6 +127,21 @@ func normalizeAuction(rc *RuntimeConfig) {
 	}
 	if rc.AuctionIntervalMaxSec < rc.AuctionIntervalMinSec {
 		rc.AuctionIntervalMinSec, rc.AuctionIntervalMaxSec = rc.AuctionIntervalMaxSec, rc.AuctionIntervalMinSec
+	}
+}
+
+// normalizeMail paces the mailbox round on the same scale as the auction round
+// that feeds it: a settlement is only waiting after a listing has sold, so
+// there is nothing to gain from checking faster than the board turns over.
+func normalizeMail(rc *RuntimeConfig) {
+	if rc.MailIntervalMinSec <= 0 {
+		rc.MailIntervalMinSec = 300
+	}
+	if rc.MailIntervalMaxSec <= 0 {
+		rc.MailIntervalMaxSec = 900
+	}
+	if rc.MailIntervalMaxSec < rc.MailIntervalMinSec {
+		rc.MailIntervalMinSec, rc.MailIntervalMaxSec = rc.MailIntervalMaxSec, rc.MailIntervalMinSec
 	}
 }
 

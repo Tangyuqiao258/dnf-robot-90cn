@@ -77,6 +77,9 @@ func (r *reconnectRuntime) AutoStore(uid int, _ func() bool) robotcap.ActionResu
 func (r *reconnectRuntime) AutoAuction(uid int) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }
+func (r *reconnectRuntime) AutoMail(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
 func (r *reconnectRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }

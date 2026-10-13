@@ -105,6 +105,10 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.AuctionIntervalMinSec = dec.Int("auction", "auction_interval_min_sec", rc.AuctionIntervalMinSec)
 	rc.AuctionIntervalMaxSec = dec.Int("auction", "auction_interval_max_sec", rc.AuctionIntervalMaxSec)
 
+	rc.MailEnabled = dec.Bool("mail", "mail_enabled", rc.MailEnabled)
+	rc.MailIntervalMinSec = dec.Int("mail", "mail_interval_min_sec", rc.MailIntervalMinSec)
+	rc.MailIntervalMaxSec = dec.Int("mail", "mail_interval_max_sec", rc.MailIntervalMaxSec)
+
 	rc.StoreEquipmentPriceMin = dec.Int("store", "store_equipment_price_min", rc.StoreEquipmentPriceMin)
 	rc.StoreEquipmentPriceMax = dec.Int("store", "store_equipment_price_max", rc.StoreEquipmentPriceMax)
 	rc.StoreEquipmentLevelWeight = dec.Int("store", "store_equipment_level_weight", rc.StoreEquipmentLevelWeight)

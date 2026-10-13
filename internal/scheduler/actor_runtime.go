@@ -402,6 +402,50 @@ func (r *RobotRuntime) AutoAuction(uid int) robotcap.ActionResult {
 	})
 }
 
+// AutoMail runs one mailbox round for an already-online robot: it claims what
+// the server is holding and deletes the letters that leaves empty. Auction
+// settlement arrives this way, so without this round a robot never receives the
+// stack it bought or the gold it sold for.
+//
+// The gates mirror AutoAuction: the capability must be enabled, the session must
+// be running and outside a stall, and the automatic schedule must be on. The
+// round takes no policy of its own -- it claims whatever is addressed to the
+// character and deletes only what it drained itself -- so the config only
+// decides whether it runs.
+func (r *RobotRuntime) AutoMail(uid int) robotcap.ActionResult {
+	return r.run(uid, func() robotcap.ActionResult {
+		if err := r.manager.requireBackendCapability(shared.CapabilityMailNotification); err != nil {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
+		}
+		st, ok := r.Status(uid)
+		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 || st.PartyActive || r.PartyActive(uid) {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
+		}
+		if st.RobotType == 2 || st.RobotType == 3 || st.StoreDisplayAck {
+			// Never disturb an active stall; the action timer retries later.
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "store_active"}
+		}
+		rc := r.Config()
+		if !rc.MailEnabled {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "disabled"}
+		}
+		runner, ok := r.manager.actions.(interface {
+			MailRound(int) (int, int, error)
+		})
+		if !ok {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "mail_unsupported"}
+		}
+		claimed, deleted, err := runner.MailRound(uid)
+		if err != nil {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed, Message: err.Error()}
+		}
+		return robotcap.ActionResult{
+			UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
+			Message: fmt.Sprintf("claimed=%d deleted=%d", claimed, deleted),
+		}
+	})
+}
+
 // AutoServerNotice runs one fleet-paced server-notice action: it prepares the
 // trigger stock in an offline window when the live probe fails, re-logs the
 // robot through the adaptive online gate, then sends the trigger packet and

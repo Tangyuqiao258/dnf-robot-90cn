@@ -242,6 +242,20 @@ func (a *Actor) tick(now time.Time) {
 			foundationlog.Robotf("[Actor] auction_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
 		}
 	}
+	if !isStore && a.nextMailDue(now, rc) {
+		var res robotcap.ActionResult
+		a.runBusy("mail", func() {
+			res = a.runtime.AutoMail(uid)
+		})
+		// A mailbox that answers with a rejection is ordinary mail business and
+		// stays inside the round, so a failure here means the session itself could
+		// not be used. It is logged for the same reason the auction round logs:
+		// a new feature must not quarantine an otherwise healthy robot while its
+		// live behavior is still being watched.
+		if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] mail_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
 	if !isStore && a.nextMoveDue(now, rc) {
 		a.runBusy("move", func() {
 			a.runtime.AutoMove(uid)
@@ -262,6 +276,7 @@ func (a *Actor) clearAutoActionSchedule() {
 	a.nextShout = time.Time{}
 	a.nextStore = time.Time{}
 	a.nextAuction = time.Time{}
+	a.nextMail = time.Time{}
 	a.nextServerNotice = time.Time{}
 }
 
@@ -270,6 +285,7 @@ func (a *Actor) clearAutoScheduleLocked() {
 	a.nextShout = time.Time{}
 	a.nextStore = time.Time{}
 	a.nextAuction = time.Time{}
+	a.nextMail = time.Time{}
 	a.nextServerNotice = time.Time{}
 	a.storeUntil = time.Time{}
 }
@@ -338,6 +354,19 @@ func (a *Actor) nextAuctionDue(now time.Time, rc robotconfig.RuntimeConfig) bool
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	return a.randomizedDue(&a.nextAuction, now, rc.AuctionIntervalMinSec, rc.AuctionIntervalMaxSec)
+}
+
+// nextMailDue paces one robot's mailbox round. Settlement mail arrives when a
+// trade settles, which is not on the robot's clock, so the interval is short
+// relative to the auction one: a robot that only checks occasionally still has
+// to clear the letters before its box fills with its own history.
+func (a *Actor) nextMailDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
+	if !rc.MailEnabled {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.randomizedDue(&a.nextMail, now, rc.MailIntervalMinSec, rc.MailIntervalMaxSec)
 }
 
 // nextServerNoticeDue is the per-robot timer. The fleet-wide gap and hourly

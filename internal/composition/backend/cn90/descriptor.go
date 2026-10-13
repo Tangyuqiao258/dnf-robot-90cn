@@ -17,7 +17,7 @@ func Info() shared.BackendInfo {
 	capabilities[shared.CapabilityCleanup] = shared.CapabilityStatus{Enabled: true, Reason: "verified roster deletion protocol; live verified"}
 	capabilities[shared.CapabilityDangerousDelete] = shared.CapabilityStatus{Enabled: true, Reason: "adapter-owned SQLite purge over the dnf_* tables; live verified (1197-account fleet purge, zero orphan rows)"}
 	capabilities[shared.CapabilityPartyDebug] = shared.CapabilityStatus{Reason: "90CN party diagnostics are not implemented"}
-	capabilities[shared.CapabilityMailNotification] = shared.CapabilityStatus{Reason: "the server implements the full mailbox protocol (op94/95/96/134/315/324/789: open, send, extract, state) but the robot adapter has no mail transport"}
+	capabilities[shared.CapabilityMailNotification] = shared.CapabilityStatus{Enabled: true, Reason: "per-robot mailbox round: op96 opens the box (class1 ack plus the class0 snapshot), op95 claims every attachment the snapshot offers and op134 status 0 deletes the letters the round drained, so a robot collects its auction settlement instead of letting the box grow; protocol and session layers unit tested, live verification pending"}
 	capabilities[shared.CapabilityDatabase] = shared.CapabilityStatus{Enabled: true, Mode: "sqlite_health", Reason: "validates the dnf_* schema of the configured SQLite file; live verified"}
 	capabilities[shared.CapabilityDiagnostics] = shared.CapabilityStatus{Reason: "90CN diagnostics are not implemented"}
 	capabilities[shared.CapabilitySystemAnnouncement] = shared.CapabilityStatus{Reason: "the DNF90 server implements no announcement broadcast"}

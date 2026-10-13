@@ -9,6 +9,7 @@ import (
 
 type partyWaitRuntime struct {
 	auctions int
+	mails    int
 	config   robotconfig.RuntimeConfig
 	status   robotcap.RuntimeStatus
 	party    bool
@@ -67,6 +68,10 @@ func (r *partyWaitRuntime) AutoStore(uid int, _ func() bool) robotcap.ActionResu
 }
 func (r *partyWaitRuntime) AutoAuction(uid int) robotcap.ActionResult {
 	r.auctions++
+	return robotcap.ActionResult{UID: uid, OK: true, State: robotcap.ActionStateSent}
+}
+func (r *partyWaitRuntime) AutoMail(uid int) robotcap.ActionResult {
+	r.mails++
 	return robotcap.ActionResult{UID: uid, OK: true, State: robotcap.ActionStateSent}
 }
 func (r *partyWaitRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {

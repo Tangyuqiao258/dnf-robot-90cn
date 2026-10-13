@@ -59,16 +59,25 @@ type RuntimeConfig struct {
 	//
 	// AuctionListPerRobot is how many live listings one character keeps: zero
 	// leaves the character as a pure buyer, and the register gate caps it at ten.
-	AuctionEnabled                  bool   `json:"auction_enabled"`
-	AuctionStockStacks              int    `json:"auction_stock_stacks"`
-	AuctionStockGold                int    `json:"auction_stock_gold"`
-	AuctionListPerRobot             int    `json:"auction_list_per_robot"`
-	AuctionListUnitPercent          int    `json:"auction_list_unit_percent"`
-	AuctionBuyEnabled               bool   `json:"auction_buy_enabled"`
-	AuctionBuyUnitPercent           int    `json:"auction_buy_unit_percent"`
-	AuctionBuyMaxTotal              int    `json:"auction_buy_max_total"`
-	AuctionIntervalMinSec           int    `json:"auction_interval_min_sec"`
-	AuctionIntervalMaxSec           int    `json:"auction_interval_max_sec"`
+	AuctionEnabled         bool `json:"auction_enabled"`
+	AuctionStockStacks     int  `json:"auction_stock_stacks"`
+	AuctionStockGold       int  `json:"auction_stock_gold"`
+	AuctionListPerRobot    int  `json:"auction_list_per_robot"`
+	AuctionListUnitPercent int  `json:"auction_list_unit_percent"`
+	AuctionBuyEnabled      bool `json:"auction_buy_enabled"`
+	AuctionBuyUnitPercent  int  `json:"auction_buy_unit_percent"`
+	AuctionBuyMaxTotal     int  `json:"auction_buy_max_total"`
+	AuctionIntervalMinSec  int  `json:"auction_interval_min_sec"`
+	AuctionIntervalMaxSec  int  `json:"auction_interval_max_sec"`
+	// Mailbox (邮件) behavior. A settled auction reaches its parties by system
+	// mail rather than in the auction reply, so a robot that never opens its
+	// mailbox never receives the item it bought or the gold it sold for. The
+	// round opens the mailbox, claims everything the snapshot offers and then
+	// deletes the letters it drained: the server keeps claimed letters, so
+	// without the delete a robot's mailbox grows for as long as it trades.
+	MailEnabled                     bool   `json:"mail_enabled"`
+	MailIntervalMinSec              int    `json:"mail_interval_min_sec"`
+	MailIntervalMaxSec              int    `json:"mail_interval_max_sec"`
 	StoreEquipmentPriceMin          int    `json:"store_equipment_price_min"`
 	StoreEquipmentPriceMax          int    `json:"store_equipment_price_max"`
 	StoreEquipmentLevelWeight       int    `json:"store_equipment_level_weight"`
