@@ -1,4 +1,4 @@
-package charset
+package cn90
 
 import "testing"
 

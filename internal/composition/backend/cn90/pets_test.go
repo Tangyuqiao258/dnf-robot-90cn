@@ -7,7 +7,7 @@ import (
 
 	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
-	"robot/internal/foundation/charset"
+	protocol "robot/internal/protocol/cn90"
 	"robot/internal/shared"
 )
 
@@ -240,7 +240,7 @@ INSERT INTO dnf_pet_entry_extra(character_id, entry_key, extra_key, extra_value)
 	if len(raw) == 0 || len(raw) >= cn90CreatureNameRawLimit {
 		t.Fatalf("repaired name_raw = %d bytes", len(raw))
 	}
-	if decoded := charset.DecodeWireName(raw); decoded != "petit" {
+	if decoded := protocol.DecodeWireName(raw); decoded != "petit" {
 		t.Fatalf("repaired name_raw decodes to %q", decoded)
 	}
 }
@@ -324,7 +324,7 @@ func TestRobotPetNameRawIsGBKUnderTheServerLimit(t *testing.T) {
 		if len(raw) >= cn90CreatureNameRawLimit {
 			t.Fatalf("case %q: name_raw=%d bytes, over the server limit", tc.name, len(raw))
 		}
-		decoded := charset.DecodeWireName(raw)
+		decoded := protocol.DecodeWireName(raw)
 		if tc.wantKept != "" {
 			if decoded != tc.wantKept {
 				t.Fatalf("case %q: name_raw decodes to %q", tc.name, decoded)

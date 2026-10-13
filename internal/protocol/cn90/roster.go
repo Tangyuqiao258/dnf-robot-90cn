@@ -3,8 +3,6 @@ package cn90
 import (
 	"encoding/binary"
 	"fmt"
-
-	"robot/internal/foundation/charset"
 )
 
 // CharacterRosterEntry is the identity exposed by the class0/op2 character
@@ -39,7 +37,7 @@ func DecodeCharacterRoster(body []byte) ([]CharacterRosterEntry, error) {
 			return nil, fmt.Errorf("character roster entry %d name: %w", i, r.err)
 		}
 		entry.NameRaw = append([]byte(nil), name...)
-		entry.Name = charset.DecodeWireName(name)
+		entry.Name = DecodeWireName(name)
 		if r.skip(2) != nil { // reserved bytes before job/grow/level
 			return nil, fmt.Errorf("character roster entry %d prefix: %w", i, r.err)
 		}
