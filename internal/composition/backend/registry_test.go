@@ -17,23 +17,14 @@ func TestSelectCN90AcrossSupportedPlatforms(t *testing.T) {
 	}
 }
 
+// TestAvailableBackendsExposeCompleteCapabilityMatrix walks the catalog rather
+// than a hand-kept list: a capability added to the catalog has to show up in
+// every registered backend's status map, since a caller cannot tell a
+// capability a backend lacks from one the backend never mentions.
 func TestAvailableBackendsExposeCompleteCapabilityMatrix(t *testing.T) {
-	want := []shared.BackendCapability{
-		shared.CapabilityProvision,
-		shared.CapabilityTownMove,
-		shared.CapabilityDungeonMove,
-		shared.CapabilityShout,
-		shared.CapabilityWorldShout,
-		shared.CapabilityStore,
-		shared.CapabilityParty,
-		shared.CapabilityGuildInvite,
-		shared.CapabilityPartyDebug,
-		shared.CapabilitySkill,
-		shared.CapabilityMarket,
-		shared.CapabilityTrade,
-		shared.CapabilityCleanup,
-		shared.CapabilityMailNotification,
-		shared.CapabilityDatabase,
+	want := shared.AllCapabilities()
+	if len(want) == 0 {
+		t.Fatal("the capability catalog is empty")
 	}
 	for _, backend := range Available() {
 		if backend.MaxOnline <= 0 {

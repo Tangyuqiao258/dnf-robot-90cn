@@ -136,17 +136,34 @@ func DecodeBackendSelection(data []byte) (BackendSelection, error) {
 	return selection, nil
 }
 
+// allCapabilities is the catalog: every capability a backend may declare. It is
+// the seed of CapabilityMatrix, so a backend that only overrides the entries it
+// implements still answers every question about itself instead of leaving a
+// capability absent -- an absent key reads as disabled, which hides a missing
+// seed behind a plausible answer. The architecture test holds this list to the
+// declared Capability* constants, so a new capability cannot be introduced
+// without also being seeded here.
+var allCapabilities = []BackendCapability{
+	CapabilityProvision, CapabilityTownMove, CapabilityDungeonMove, CapabilityDungeonFollow,
+	CapabilityDungeonRevive,
+	CapabilityShout, CapabilityWorldShout, CapabilityStore, CapabilityParty, CapabilityGuildInvite,
+	CapabilityPartyDebug, CapabilitySkill, CapabilityEmote,
+	CapabilityMarket, CapabilityTrade, CapabilityCleanup, CapabilityDangerousDelete,
+	CapabilityMailNotification,
+	CapabilityDatabase, CapabilityDiagnostics,
+	CapabilitySystemAnnouncement, CapabilityServerNotice, CapabilityServiceControl,
+}
+
+// AllCapabilities returns the capability catalog. Callers that need to reason
+// about the whole set get a copy, so no caller can empty the catalog for the
+// others.
+func AllCapabilities() []BackendCapability {
+	return append([]BackendCapability(nil), allCapabilities...)
+}
+
 func CapabilityMatrix(status CapabilityStatus) map[BackendCapability]CapabilityStatus {
-	capabilities := make(map[BackendCapability]CapabilityStatus)
-	for _, capability := range []BackendCapability{
-		CapabilityProvision, CapabilityTownMove, CapabilityDungeonMove, CapabilityDungeonFollow,
-		CapabilityShout, CapabilityWorldShout, CapabilityStore, CapabilityParty, CapabilityGuildInvite,
-		CapabilityPartyDebug, CapabilitySkill,
-		CapabilityMarket, CapabilityTrade, CapabilityCleanup, CapabilityDangerousDelete,
-		CapabilityMailNotification,
-		CapabilityDatabase, CapabilityDiagnostics,
-		CapabilitySystemAnnouncement, CapabilityServerNotice, CapabilityServiceControl,
-	} {
+	capabilities := make(map[BackendCapability]CapabilityStatus, len(allCapabilities))
+	for _, capability := range allCapabilities {
 		capabilities[capability] = status
 	}
 	return capabilities
