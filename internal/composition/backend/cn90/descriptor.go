@@ -9,8 +9,8 @@ func Info() shared.BackendInfo {
 	capabilities[shared.CapabilityProvision] = shared.CapabilityStatus{Enabled: true, Reason: "protocol character creation plus offline level/grow, equipment/avatar and pet generation; live verified"}
 	capabilities[shared.CapabilityTownMove] = shared.CapabilityStatus{Enabled: true, Reason: "op36 town/area and op35 position requests follow the current client shapes; verified live"}
 	capabilities[shared.CapabilityDungeonFollow] = shared.CapabilityStatus{Reason: "90CN party/dungeon follower is not implemented yet"}
-	capabilities[shared.CapabilityParty] = shared.CapabilityStatus{Reason: "90CN party protocol is not implemented yet"}
-	capabilities[shared.CapabilityGuildInvite] = shared.CapabilityStatus{Reason: "90CN guild invitation protocol is not implemented yet"}
+	capabilities[shared.CapabilityParty] = shared.CapabilityStatus{Reason: "the server implements the town party invite/accept flow (op10 invitation, class0/0x0007 prompt to the target, op11 acceptance, same-area online target required) but the robot adapter has no party transport"}
+	capabilities[shared.CapabilityGuildInvite] = shared.CapabilityStatus{Reason: "the server has no guild invite route: op151/op152 and the op347-351 join-application family have no handler; only guild creation and state projection exist"}
 	capabilities[shared.CapabilityShout] = shared.CapabilityStatus{Reason: "the server has no broadcast shout; it only forwards same-area directed peer chat (op17 request carrying a target id and name, op118 notice delivered to that online target), so the shout semantics are redefined as directed private chat and stay off until a target-bearing intent exists"}
 	capabilities[shared.CapabilityStore] = shared.CapabilityStatus{Enabled: true, Reason: "disassembler machine (op598 kind 0) and enchanter stall (op598 kind 3) with offline profession preparation; the private item stall stays unsupported; live protocol verified"}
 	capabilities[shared.CapabilityWorldShout] = shared.CapabilityStatus{Reason: "the server exposes no world or area chat channel; chat is limited to same-area directed peer chat (op17/op118)"}
