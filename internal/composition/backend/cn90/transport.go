@@ -71,7 +71,14 @@ func (t *ActionTransport) Attach(uid int, session shared.RobotSession) error {
 		return fmt.Errorf("90CN session already attached for uid %d", uid)
 	}
 	t.sessions[uid] = session
-	t.status[uid] = shared.RuntimeStatus{UID: uid, StateName: shared.RuntimeStateRunning, State: 3, RunStartTime: time.Now().Unix()}
+	status := shared.RuntimeStatus{UID: uid, StateName: shared.RuntimeStateRunning, State: 3, RunStartTime: time.Now().Unix()}
+	// A session that reaches the transport has already selected its character,
+	// so the id can be published here. Nothing else in the transport writes
+	// CID, and the auction round refuses to run without it.
+	if identified, ok := session.(interface{ CharacterID() int }); ok {
+		status.CID = identified.CharacterID()
+	}
+	t.status[uid] = status
 	delete(t.locationKnown, uid)
 	t.mu.Unlock()
 	if lifecycle, ok := session.(interface{ setTerminationCallback(func()) }); ok {

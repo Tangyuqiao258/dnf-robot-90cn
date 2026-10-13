@@ -266,3 +266,50 @@ func TestActionTransportReconnectStartsWithFreshTownSnapshot(t *testing.T) {
 	}
 	close(first.done)
 }
+
+// cidActionTestSession reports a selected character id the way the real 90CN
+// session does once it has picked its character.
+type cidActionTestSession struct {
+	actionTestSession
+	cid int
+}
+
+func (s *cidActionTestSession) CharacterID() int { return s.cid }
+
+// TestActionTransportPublishesSelectedCharacterID pins the hand-off the auction
+// round depends on: the stock plan it lists is a pure function of the character
+// id -- the same function the offline seeder used -- and the round refuses to
+// run without it. A transport that never publishes the id leaves every auction
+// round reporting "needs a selected character".
+func TestActionTransportPublishesSelectedCharacterID(t *testing.T) {
+	transport := NewActionTransport()
+	if err := transport.Attach(7, &cidActionTestSession{cid: 42}); err != nil {
+		t.Fatal(err)
+	}
+	if status := transport.RuntimeStatusMap()[7]; status.CID != 42 {
+		t.Fatalf("runtime status CID = %d, want 42", status.CID)
+	}
+
+	// A reconnect attaches a fresh session, so the status has to follow it
+	// rather than keep the reaped session's id.
+	transport.Detach(7)
+	if err := transport.Attach(7, &cidActionTestSession{cid: 77}); err != nil {
+		t.Fatal(err)
+	}
+	if status := transport.RuntimeStatusMap()[7]; status.CID != 77 {
+		t.Fatalf("reconnected runtime status CID = %d, want 77", status.CID)
+	}
+}
+
+// TestActionTransportLeavesCIDUnsetWithoutSelectedCharacter covers the other
+// half of the contract: a session that cannot name its character must stay at
+// zero rather than be reported as one that has.
+func TestActionTransportLeavesCIDUnsetWithoutSelectedCharacter(t *testing.T) {
+	transport := NewActionTransport()
+	if err := transport.Attach(7, &actionTestSession{}); err != nil {
+		t.Fatal(err)
+	}
+	if status := transport.RuntimeStatusMap()[7]; status.CID != 0 {
+		t.Fatalf("runtime status CID = %d, want 0", status.CID)
+	}
+}

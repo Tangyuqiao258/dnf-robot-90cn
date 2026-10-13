@@ -446,6 +446,18 @@ func (s *Session) Done() <-chan struct{} {
 	return s.done
 }
 
+// CharacterID reports the character this session selected. The transport
+// publishes it as the runtime status CID, which is what the auction round keys
+// its stock plan on: the plan is a pure function of the character id, so the
+// runtime recomputes exactly the bag rows the offline seeder wrote, and without
+// the id the round has no way to name them.
+func (s *Session) CharacterID() int {
+	if s == nil {
+		return 0
+	}
+	return int(s.selfCharacterID)
+}
+
 // setTerminationCallback keeps session lifecycle notification inside the
 // 90CN adapter. It avoids one waiter goroutine per online robot without
 // widening the shared RobotSession contract.
