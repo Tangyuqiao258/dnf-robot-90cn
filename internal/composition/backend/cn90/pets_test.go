@@ -199,6 +199,52 @@ INSERT INTO dnf_equipment_entry_extra(character_id, entry_key, extra_key, extra_
 	}
 }
 
+// TestReconcileRepairsCreatureRowsWrittenWithoutGBKName covers creatures written
+// before the GBK name encoding landed. The rows carry the robot_loadout marker,
+// so the plain marker check would leave the character offline forever, while
+// their NULL name_raw still overflows the server limit through the UTF-8
+// fallback.
+func TestReconcileRepairsCreatureRowsWrittenWithoutGBKName(t *testing.T) {
+	path := newPetTestDatabase(t)
+	config := robotconfig.Default()
+	config.EquipSlots = []int{1}
+	config.AvatarSlots = []int{0}
+	config.MinAvatarSlots = 0
+	config.PetEnabled = true
+	config.PetProbabilityPercent = 100
+	config.PetArtifactEnabled = false
+	applier, err := NewSQLiteLoadoutApplier(context.Background(), path, config, petTestCatalog(), "", func(int) int { return 0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer applier.Close()
+	db := openPurgeTestDatabase(t, path)
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO dnf_equipments(character_id, updated_at) VALUES ('9', '2026-01-01T00:00:00Z');
+INSERT INTO dnf_equipment_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','11','robot_loadout','1');
+INSERT INTO dnf_pet_entries(character_id, pet_key, item_id, pet_name, name_raw) VALUES ('9','1',60001,'petit',NULL);
+INSERT INTO dnf_pet_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','1','robot_loadout','1');`); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := applier.ReconcileRobotLoadouts(context.Background(), "robot", []robotcap.Info{{UID: 17000009, CID: 9, Name: "tester"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced != 1 {
+		t.Fatalf("reconciled robots = %d, want the repair pass", replaced)
+	}
+	var raw []byte
+	if err := db.QueryRow(`SELECT name_raw FROM dnf_pet_entries WHERE character_id='9' AND pet_key='1'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) == 0 || len(raw) >= cn90CreatureNameRawLimit {
+		t.Fatalf("repaired name_raw = %d bytes", len(raw))
+	}
+	if decoded := charset.DecodeWireName(raw); decoded != "petit" {
+		t.Fatalf("repaired name_raw decodes to %q", decoded)
+	}
+}
+
 func TestRobotPetHonoursDisabledConfig(t *testing.T) {
 	path := newPetTestDatabase(t)
 	config := robotconfig.Default()

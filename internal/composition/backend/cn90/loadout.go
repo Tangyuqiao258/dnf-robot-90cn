@@ -202,7 +202,8 @@ func (a *SQLiteLoadoutApplier) ReconcileRobotLoadouts(ctx context.Context, accou
 // robot_loadout marker, so any marked row means the loadout was already
 // applied and operator edits must survive. When pets are enabled the creature
 // state is checked the same way so a character created before the pet stage is
-// upgraded on the next startup.
+// upgraded on the next startup, and a creature row written before the GBK name
+// encoding is re-applied so its name_raw stops overflowing the server limit.
 func (a *SQLiteLoadoutApplier) equipmentNeedsLoadout(ctx context.Context, account string) (bool, error) {
 	readCtx, cancel := context.WithTimeout(ctx, cn90PersistenceTimeout)
 	defer cancel()
@@ -236,7 +237,20 @@ func (a *SQLiteLoadoutApplier) equipmentNeedsLoadout(ctx context.Context, accoun
 		row.characterID).Scan(&petMarked); err != nil {
 		return false, fmt.Errorf("count 90CN generated pet character=%s: %w", row.characterID, err)
 	}
-	return petMarked == 0, nil
+	if petMarked == 0 {
+		return true, nil
+	}
+	// A marked creature entry with a name but no name_raw was written before the
+	// GBK name encoding landed: the server then falls back to the UTF-8 bytes of
+	// pet_name and refuses the state at its 30-byte limit, keeping the character
+	// offline. Re-apply once to repair such a row.
+	var nameless int
+	if err := db.QueryRowContext(readCtx,
+		`SELECT COUNT(*) FROM `+dnfPetEntriesTable+` WHERE character_id=? AND name_raw IS NULL AND pet_name <> ''`,
+		row.characterID).Scan(&nameless); err != nil {
+		return false, fmt.Errorf("count 90CN creature names character=%s: %w", row.characterID, err)
+	}
+	return nameless > 0, nil
 }
 
 // ResolveCharacterProfile reads the robot account's active character row.
