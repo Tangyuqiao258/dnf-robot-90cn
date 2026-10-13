@@ -345,6 +345,9 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 	if !m.backendInfo.Supports(shared.CapabilityTrade) {
 		rc.AutoTrade = false
 	}
+	if !m.backendInfo.Supports(shared.CapabilityServerNotice) {
+		rc.AutoServerNotice = false
+	}
 }
 
 func (m *RobotManager) publishRobotConfigLocked(path string, base robotconfig.RuntimeConfig, previous *robotConfigSnapshot) {
