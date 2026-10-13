@@ -1,7 +1,6 @@
 package pvf
 
 import (
-	"encoding/binary"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -50,12 +49,6 @@ type CharacterStatTables struct {
 	Awakening   [7][3]StatVector
 	AwakenSet   [7][3]bool
 }
-
-// Premium bonuses applied by the server when building the wire stat blob.
-const (
-	premiumHpBonus = 9800
-	premiumMpBonus = 10500
-)
 
 // FallbackCharacterStatTables is used when a .chr file is missing or cannot be
 // parsed. Unlike the server's fixed fallback (which throws above level 1), the
@@ -219,129 +212,6 @@ func buildStatPatterns() map[string]*regexp.Regexp {
 		result[key] = regexp.MustCompile(`(?i)\[` + regexp.QuoteMeta(key) + `\]\s*([-\d.]+)`)
 	}
 	return result
-}
-
-// BuildAdditionalInfo mirrors the server's
-// CharacterStatComputer.BuildAdditionalInfo: it accumulates the base row plus
-// the level growth rows (1..14 base, 15..49 transfer, 50+ awakening), adds the
-// premium HP/MP bonuses and serializes the 82-byte wire blob.
-func BuildAdditionalInfo(tables CharacterStatTables, level, first, second int) ([]byte, error) {
-	if first < 0 || first > maxA21FirstGrow || second < 0 || second > 2 {
-		return nil, fmt.Errorf("invalid character growth first=%d second=%d", first, second)
-	}
-	if level < 1 {
-		level = 1
-	}
-	acc := tables.Base
-	if level > 1 {
-		if !tables.GrowtypeSet[1] {
-			return nil, fmt.Errorf("character stat table has no [growtype 1] growth row")
-		}
-		base := tables.Growtype[1]
-		if !tables.GrowtypeSet[first+1] {
-			return nil, fmt.Errorf("character stat table has no [growtype %d] growth row", first+1)
-		}
-		firstGrow := tables.Growtype[first+1]
-		awakening := firstGrow
-		if second > 0 {
-			if !tables.AwakenSet[first+1][second] {
-				return nil, fmt.Errorf("character stat table has no [awakening %d] row for growtype %d", second, first+1)
-			}
-			awakening = tables.Awakening[first+1][second]
-		}
-		for i := 1; i < level; i++ {
-			switch {
-			case i <= 14:
-				acc.add(base)
-			case i <= 49:
-				acc.add(firstGrow)
-			default:
-				acc.add(awakening)
-			}
-		}
-	}
-	blob := make([]byte, 82)
-	binary.LittleEndian.PutUint32(blob[0:4], uint32(acc.HpMax+premiumHpBonus))
-	binary.LittleEndian.PutUint32(blob[4:8], uint32(acc.MpMax+premiumMpBonus))
-	putInt16 := func(offset, value int) {
-		binary.LittleEndian.PutUint16(blob[offset:offset+2], uint16(int16(value)))
-	}
-	putInt16(8, acc.PhysAtk)
-	putInt16(10, acc.PhysDef)
-	putInt16(12, acc.MagAtk)
-	putInt16(14, acc.MagDef)
-	putInt16(16, acc.FireRes)
-	putInt16(18, acc.WaterRes)
-	putInt16(20, acc.DarkRes)
-	putInt16(22, acc.LightRes)
-	// offsets 24..57 are the server's 17 x u16 status-resistance placeholders
-	binary.LittleEndian.PutUint32(blob[58:62], uint32(acc.InventoryLimit))
-	binary.LittleEndian.PutUint16(blob[62:64], uint16(acc.HpRegen))
-	binary.LittleEndian.PutUint16(blob[64:66], uint16(acc.MpRegen))
-	binary.LittleEndian.PutUint32(blob[66:70], uint32(acc.MoveSpeed))
-	binary.LittleEndian.PutUint16(blob[70:72], uint16(acc.AttackSpeed))
-	binary.LittleEndian.PutUint16(blob[72:74], uint16(acc.CastSpeed))
-	binary.LittleEndian.PutUint16(blob[74:76], uint16(acc.HitRecovery))
-	binary.LittleEndian.PutUint16(blob[76:78], uint16(acc.JumpPower))
-	binary.LittleEndian.PutUint32(blob[78:82], uint32(acc.Weight))
-	return blob, nil
-}
-
-// CombatStatFields is the character_subtype1_fields projection of the 82-byte
-// stat blob, using the same offsets as the server's SqliteSubtype1Repository.
-type CombatStatFields struct {
-	HpMax, MpMax, InventoryLimit, MoveSpeed, Weight int64
-	PhysAtk, PhysDef, MagAtk, MagDef                int
-	FireRes, WaterRes, DarkRes, LightRes            int
-	HpRegen, MpRegen, AttackSpeed                   int
-	CastSpeed, HitRecovery, JumpPower               int
-}
-
-func ParseCombatStatFields(blob []byte) (CombatStatFields, error) {
-	if len(blob) < 82 {
-		return CombatStatFields{}, fmt.Errorf("character stat blob is %d bytes, want 82", len(blob))
-	}
-	var fields CombatStatFields
-	offset := 0
-	fields.HpMax = int64(binary.LittleEndian.Uint32(blob[offset : offset+4]))
-	offset += 4
-	fields.MpMax = int64(binary.LittleEndian.Uint32(blob[offset : offset+4]))
-	offset += 4
-	fields.PhysAtk = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	fields.PhysDef = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	fields.MagAtk = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	fields.MagDef = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	fields.FireRes = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	fields.WaterRes = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	fields.DarkRes = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	fields.LightRes = int(int16(binary.LittleEndian.Uint16(blob[offset : offset+2])))
-	offset += 2
-	offset += 34 // 17 x u16 status resistance placeholders
-	fields.InventoryLimit = int64(binary.LittleEndian.Uint32(blob[offset : offset+4]))
-	offset += 4
-	fields.HpRegen = int(binary.LittleEndian.Uint16(blob[offset : offset+2]))
-	offset += 2
-	fields.MpRegen = int(binary.LittleEndian.Uint16(blob[offset : offset+2]))
-	offset += 2
-	fields.MoveSpeed = int64(binary.LittleEndian.Uint32(blob[offset : offset+4]))
-	offset += 4
-	fields.AttackSpeed = int(binary.LittleEndian.Uint16(blob[offset : offset+2]))
-	offset += 2
-	fields.CastSpeed = int(binary.LittleEndian.Uint16(blob[offset : offset+2]))
-	offset += 2
-	fields.HitRecovery = int(binary.LittleEndian.Uint16(blob[offset : offset+2]))
-	offset += 2
-	fields.JumpPower = int(binary.LittleEndian.Uint16(blob[offset : offset+2]))
-	offset += 2
-	fields.Weight = int64(binary.LittleEndian.Uint32(blob[offset : offset+4]))
-	return fields, nil
 }
 
 // ProjectLevelThresholds parses character/ExpTable.tbl: the cumulative

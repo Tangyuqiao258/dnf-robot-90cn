@@ -53,74 +53,6 @@ func TestParseCharacterStatTablesSplitsGrowthAndAwakeningRows(t *testing.T) {
 	}
 }
 
-func TestBuildAdditionalInfoMatchesServerAccumulation(t *testing.T) {
-	tables, err := parseCharacterStatTables(testCharacterFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hp := func(level, first, second int) int64 {
-		blob, err := BuildAdditionalInfo(tables, level, first, second)
-		if err != nil {
-			t.Fatalf("build level=%d first=%d second=%d: %v", level, first, second, err)
-		}
-		fields, err := ParseCombatStatFields(blob)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return fields.HpMax
-	}
-	// Base 1000 + premium 9800.
-	if got := hp(1, 0, 0); got != 10800 {
-		t.Fatalf("level 1 hp=%d", got)
-	}
-	// 14 levels of the base grow row (10/level).
-	if got := hp(15, 0, 0); got != 1000+140+9800 {
-		t.Fatalf("level 15 hp=%d", got)
-	}
-	// Transfer to branch 1: levels 15..49 use [growtype 2] (20/level).
-	if got := hp(50, 1, 0); got != 1000+140+700+9800 {
-		t.Fatalf("level 50 branch hp=%d", got)
-	}
-	// Awakening 1 switches the 50+ segment to [awakening 1] (30/level).
-	if got := hp(51, 1, 1); got != 1000+140+700+30+9800 {
-		t.Fatalf("level 51 awakening hp=%d", got)
-	}
-	// Branch 2 uses [growtype 3] (200/level) for 15..49.
-	if got := hp(50, 2, 0); got != 1000+140+7000+9800 {
-		t.Fatalf("level 50 branch 2 hp=%d", got)
-	}
-	if _, err := BuildAdditionalInfo(tables, 60, 2, 1); err == nil {
-		t.Fatal("missing awakening row was accepted")
-	}
-}
-
-func TestParseCombatStatFieldsUsesServerOffsets(t *testing.T) {
-	blob, err := BuildAdditionalInfo(FallbackCharacterStatTables(), 1, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fields, err := ParseCombatStatFields(blob)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fields.HpMax != 1800+9800 || fields.MpMax != 1400+10500 {
-		t.Fatalf("hp/mp=%d/%d", fields.HpMax, fields.MpMax)
-	}
-	if fields.PhysAtk != 75 || fields.PhysDef != 75 || fields.MagAtk != 45 || fields.MagDef != 45 {
-		t.Fatalf("attack/defense=%+v", fields)
-	}
-	if fields.InventoryLimit != 480000 || fields.MpRegen != 500 || fields.MoveSpeed != 8500 {
-		t.Fatalf("inventory/regen/move=%+v", fields)
-	}
-	if fields.AttackSpeed != 8500 || fields.CastSpeed != 7000 || fields.HitRecovery != 6000 ||
-		fields.JumpPower != 4300 || fields.Weight != 500000 {
-		t.Fatalf("speed/weight=%+v", fields)
-	}
-	if _, err := ParseCombatStatFields(blob[:81]); err == nil {
-		t.Fatal("short blob was accepted")
-	}
-}
-
 func TestProjectLevelThresholdsAndLevelExpFor(t *testing.T) {
 	archive := testTextArchive{"character/exptable.tbl": "0 100 300 600 1000"}
 	thresholds := ProjectLevelThresholds(archive)
@@ -157,16 +89,9 @@ func TestProjectCharacterStatCatalogFallsBackOnMalformedFile(t *testing.T) {
 	if !fallback.GrowtypeSet[1] || fallback.Base.HpMax != 1800 {
 		t.Fatalf("fallback job=%+v", fallback)
 	}
-	// The fallback stays buildable above level 1: base row only, no growth.
-	blob, err := BuildAdditionalInfo(fallback, 50, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fields, err := ParseCombatStatFields(blob)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fields.HpMax != 1800+9800 {
-		t.Fatalf("fallback level 50 hp=%d", fields.HpMax)
+	// The fallback keeps provisioning working above level 1 because its growth
+	// rows are zero-delta: the base row is all a later stat read would see.
+	if fallback.Growtype[1].HpMax != 0 || fallback.Growtype[6].HpMax != 0 {
+		t.Fatalf("fallback growth rows are not zero-delta: %+v", fallback.Growtype)
 	}
 }
