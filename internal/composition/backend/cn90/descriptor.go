@@ -11,9 +11,9 @@ func Info() shared.BackendInfo {
 	capabilities[shared.CapabilityDungeonFollow] = shared.CapabilityStatus{Reason: "90CN party/dungeon follower is not implemented yet"}
 	capabilities[shared.CapabilityParty] = shared.CapabilityStatus{Reason: "90CN party protocol is not implemented yet"}
 	capabilities[shared.CapabilityGuildInvite] = shared.CapabilityStatus{Reason: "90CN guild invitation protocol is not implemented yet"}
-	capabilities[shared.CapabilityShout] = shared.CapabilityStatus{Reason: "90CN chat transport is not implemented yet"}
+	capabilities[shared.CapabilityShout] = shared.CapabilityStatus{Reason: "the server has no broadcast shout; it only forwards same-area directed peer chat (op17 request carrying a target id and name, op118 notice delivered to that online target), so the shout semantics are redefined as directed private chat and stay off until a target-bearing intent exists"}
 	capabilities[shared.CapabilityStore] = shared.CapabilityStatus{Enabled: true, Reason: "disassembler machine (op598 kind 0) and enchanter stall (op598 kind 3) with offline profession preparation; the private item stall stays unsupported; live protocol verified"}
-	capabilities[shared.CapabilityWorldShout] = shared.CapabilityStatus{Reason: "90CN has no verified world-shout protocol mode"}
+	capabilities[shared.CapabilityWorldShout] = shared.CapabilityStatus{Reason: "the server exposes no world or area chat channel; chat is limited to same-area directed peer chat (op17/op118)"}
 	capabilities[shared.CapabilityCleanup] = shared.CapabilityStatus{Enabled: true, Reason: "verified roster deletion protocol; live verified"}
 	capabilities[shared.CapabilityDangerousDelete] = shared.CapabilityStatus{Enabled: true, Reason: "adapter-owned SQLite purge over the dnf_* tables; live verified (1197-account fleet purge, zero orphan rows)"}
 	capabilities[shared.CapabilityPartyDebug] = shared.CapabilityStatus{Reason: "90CN party diagnostics are not implemented"}

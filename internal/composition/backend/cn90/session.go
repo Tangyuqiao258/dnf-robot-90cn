@@ -298,13 +298,15 @@ func (s *Session) MoveTownArea(ctx context.Context, intent shared.TownAreaMoveIn
 	}
 }
 
-// Shout is not implemented for 90CN yet: the verified outbound chat mode and
-// recipient encoding have not been established for this client profile.
+// Shout is not implemented for 90CN: the server has no broadcast shout. It
+// only forwards same-area directed peer chat (the class1/op17 request carries
+// a target id and name, delivered as a class0/op118 notice), which the
+// target-less ShoutIntent cannot express.
 func (s *Session) Shout(ctx context.Context, intent shared.ShoutIntent) error {
 	return shared.UnsupportedCapabilityError{
 		Backend:   BackendID,
 		Operation: shared.CapabilityShout,
-		Reason:    "90CN chat transport is not implemented yet",
+		Reason:    "90CN has no broadcast shout; only same-area directed peer chat exists and the target-less shout intent cannot express it",
 	}
 }
 
