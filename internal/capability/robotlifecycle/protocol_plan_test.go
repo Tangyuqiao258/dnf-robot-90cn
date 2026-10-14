@@ -20,8 +20,9 @@ func TestBuildProtocolRobotPlansReusesCommonNameAndSpawnPolicies(t *testing.T) {
 	if err != nil || len(plans) != 2 {
 		t.Fatalf("plans=%+v err=%v", plans, err)
 	}
-	// first grow 2 (transfer branch) + second grow 2 (awakening) = 0x22.
-	if plans[0].Info.Job != 1 || plans[0].Info.Grow != 0x22 || plans[0].Info.Level != 50 || plans[0].Info.Area != 3 {
+	// first grow 2 (transfer branch) + second grow 1 (level 50 opens the first
+	// awakening, not the second) = 0x12.
+	if plans[0].Info.Job != 1 || plans[0].Info.Grow != 0x12 || plans[0].Info.Level != 50 || plans[0].Info.Area != 3 {
 		t.Fatalf("first=%+v", plans[0])
 	}
 	if plans[0].Request.AccountName != "acct17000000" || plans[0].Request.RobotUID != 17000000 {
@@ -118,6 +119,105 @@ func TestBuildProtocolRobotPlansStationsTheTradeOnItsMarket(t *testing.T) {
 	// Without a share the robot disassembles, and 2/9 is not its market.
 	if info := plan(t, 0); info.Village == 2 && info.Area == 9 {
 		t.Fatalf("disassembler planned on the enchanting market: %d/%d", info.Village, info.Area)
+	}
+}
+
+func TestAwakeningForLevelFollowsTheLevelBands(t *testing.T) {
+	for _, testCase := range []struct {
+		level int
+		want  int
+	}{
+		{level: 1, want: 0},
+		{level: 49, want: 0},
+		{level: 50, want: 1},
+		{level: 74, want: 1},
+		{level: 75, want: 2},
+		{level: 90, want: 2},
+	} {
+		if got := AwakeningForLevel(testCase.level); got != testCase.want {
+			t.Fatalf("level %d awakens at stage %d, want %d", testCase.level, got, testCase.want)
+		}
+	}
+}
+
+func TestSelectJobGrowthGatesTransferAndAwakeningByLevel(t *testing.T) {
+	jobGrows := map[int][]int{0: {1, 2}}
+	configured := []int{0, 1, 2}
+	for _, testCase := range []struct {
+		level  int
+		branch int
+		grow   int
+	}{
+		// Below the transfer gate the robot stays a base class, whatever the
+		// ini's awakening pool says.
+		{level: 10, branch: 0, grow: 0x00},
+		// Transfer only: the awakening nibble stays empty until level 50.
+		{level: 49, branch: 1, grow: 0x01},
+		{level: 50, branch: 1, grow: 0x11},
+		{level: 74, branch: 1, grow: 0x11},
+		{level: 75, branch: 1, grow: 0x21},
+		{level: 90, branch: 1, grow: 0x21},
+	} {
+		branch, grow := SelectJobGrowth(0, testCase.level, jobGrows, configured, func(int) int { return 0 })
+		if branch != testCase.branch || grow != testCase.grow {
+			t.Fatalf("level %d grew branch=%d grow=0x%02X, want branch=%d grow=0x%02X",
+				testCase.level, branch, grow, testCase.branch, testCase.grow)
+		}
+	}
+}
+
+func TestBuildProtocolRobotPlansLevelsDungeonEntranceRobots(t *testing.T) {
+	plans, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
+		Count: 1, IDStart: 17001000, AccountPrefix: "acct",
+		Config: robotconfig.RuntimeConfig{
+			LevelMin: 50, LevelMax: 85, Jobs: []int{0}, GrowTypes: []int{0, 1, 2},
+			SpawnFallbackVillage: 1,
+		},
+		Names: robottemplate.NameTemplates{Common: []string{"Alpha"}},
+		Maps: []shared.MapCatalogItem{{
+			Village: 39, Area: 0, Level: 1, Use: true, DungeonGate: true, DungeonLevel: 81,
+			Rectangles: []shared.MapRectangle{{XMin: 0, XMax: 100, YMin: 0, YMax: 100}},
+		}},
+		JobGrows:    map[int][]int{0: {1, 2}},
+		RandIntn:    func(int) int { return 0 },
+		RandBetween: func(min, max int) int { return min },
+	})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%+v err=%v", plans, err)
+	}
+	// An entrance guard is leveled to its dungeon: entry 81 plus the smallest
+	// draw of the 1..4 spread, not the level the plan sampled from 50..85.
+	if plans[0].Info.Level != 82 {
+		t.Fatalf("entrance guard level=%d, want 82", plans[0].Info.Level)
+	}
+	// 82 is past the second awakening gate, so the robot is grown for the level
+	// it ended up with rather than the band it was drawn from.
+	if plans[0].Info.Grow != 0x21 {
+		t.Fatalf("entrance guard grow=0x%02X, want 0x21", plans[0].Info.Grow)
+	}
+}
+
+func TestBuildProtocolRobotPlansKeepsTheDrawnLevelAwayFromDungeons(t *testing.T) {
+	plans, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
+		Count: 1, IDStart: 17001000, AccountPrefix: "acct",
+		Config: robotconfig.RuntimeConfig{
+			LevelMin: 50, LevelMax: 50, Jobs: []int{0}, GrowTypes: []int{2},
+			SpawnFallbackVillage: 1,
+		},
+		Names: robottemplate.NameTemplates{Common: []string{"Alpha"}},
+		Maps: []shared.MapCatalogItem{{
+			Village: 4, Area: 1, Level: 1, Use: true,
+			Rectangles: []shared.MapRectangle{{XMin: 0, XMax: 100, YMin: 0, YMax: 100}},
+		}},
+		JobGrows:    map[int][]int{0: {1}},
+		RandIntn:    func(int) int { return 0 },
+		RandBetween: func(min, max int) int { return min },
+	})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%+v err=%v", plans, err)
+	}
+	if plans[0].Info.Level != 50 || plans[0].Info.Grow != 0x11 {
+		t.Fatalf("ordinary map planned level=%d grow=0x%02X, want 50/0x11", plans[0].Info.Level, plans[0].Info.Grow)
 	}
 }
 

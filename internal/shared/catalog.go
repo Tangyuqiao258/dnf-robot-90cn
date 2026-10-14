@@ -95,6 +95,11 @@ type MapCatalogItem struct {
 	// DungeonGate marks a map that hosts dungeon entrances. Crowd rules pin the
 	// disassembler stalls to these maps.
 	DungeonGate bool `json:"dungeon_gate,omitempty"`
+	// DungeonLevel is the level a character must reach before the dungeons this
+	// map's entrances open, or zero when the map hosts no dungeon whose entry
+	// level is known. A robot standing at a dungeon entrance is leveled to the
+	// dungeon it guards.
+	DungeonLevel int `json:"dungeon_level,omitempty"`
 	// GateX, GateY is where a character arrives on a generic area transition;
 	// zero means the area declares no arrival point.
 	GateX int `json:"gate_x,omitempty"`

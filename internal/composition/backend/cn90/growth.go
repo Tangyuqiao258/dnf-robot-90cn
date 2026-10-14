@@ -45,16 +45,18 @@ func ReconcileRobotGrowth(ctx context.Context, databasePath string, robots []rob
 		if info.CID <= 0 {
 			continue
 		}
-		grow, ok := reconciledGrow(info.Job, info.Grow, growTypes, jobGrows[info.Job], statTables, reconcileAwakening, randIntn)
-		if !ok {
-			continue
-		}
+		// The level decides which growth steps the character may take, so it is
+		// read before the grow byte is reconciled.
 		var level int
 		if err := tx.QueryRowContext(ctx, `SELECT level FROM `+dnfCharactersTable+` WHERE character_id=? AND delete_flag=0`, strconv.Itoa(info.CID)).Scan(&level); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
 			return changed, fmt.Errorf("read 90CN growth reconcile level id=%d: %w", info.CID, err)
+		}
+		grow, ok := reconciledGrow(info.Job, level, info.Grow, growTypes, jobGrows[info.Job], statTables, reconcileAwakening, randIntn)
+		if !ok {
+			continue
 		}
 		info.Level = level
 		if _, err := tx.ExecContext(ctx, `UPDATE `+dnfCharactersTable+` SET grow_type=?, updated_at=? WHERE character_id=?`,
@@ -75,17 +77,27 @@ func ReconcileRobotGrowth(ctx context.Context, databasePath string, robots []rob
 
 // reconciledGrow returns the target grow byte for one stored robot.
 // Untransferred, unreleased-branch and malformed values are re-picked from the
-// PVF catalog; a released branch at stage 0 is awakened when enabled and the
-// branch's .chr file actually contains a configured awakening row. States that
-// already satisfy the configuration are reported as unchanged.
-func reconciledGrow(job, grow int, growTypes []int, branches []int, statTables map[int]capabilitypvf.CharacterStatTables, reconcileAwakening bool, randIntn func(int) int) (int, bool) {
+// PVF catalog along the level's growth bands; a released branch at stage 0 is
+// awakened when enabled and the branch's .chr file actually contains the stage's
+// awakening row. States that already satisfy the configuration are reported as
+// unchanged.
+func reconciledGrow(job, level, grow int, growTypes []int, branches []int, statTables map[int]capabilitypvf.CharacterStatTables, reconcileAwakening bool, randIntn func(int) int) (int, bool) {
 	first := grow & 0x0F
 	second := (grow >> 4) & 0x0F
+	if level < robotlifecycle.TransferLevel {
+		// Below the transfer gate the character is a base class, so a branch
+		// left over from an operator edit comes off.
+		if grow == 0 {
+			return 0, false
+		}
+		return 0, true
+	}
+	stages := robotlifecycle.AwakeningStagesForLevel(level, growTypes)
 	if !releasedBranch(branches, first) {
-		pick, target := robotlifecycle.SelectBranchGrowth(branches, growTypes, randIntn)
+		pick, target := robotlifecycle.SelectBranchGrowth(branches, stages, randIntn)
 		targetSecond := (target >> 4) & 0x0F
 		if targetSecond > 0 && !statTables[job].AwakenSet[pick+1][targetSecond] {
-			if stage, ok := availableAwakening(statTables[job], pick, growTypes, randIntn); ok {
+			if stage, ok := availableAwakening(statTables[job], pick, stages, randIntn); ok {
 				target = (stage << 4) | (pick & 0x0F)
 			} else {
 				target = pick & 0x0F
@@ -98,8 +110,8 @@ func reconciledGrow(job, grow int, growTypes []int, branches []int, statTables m
 	}
 	if second > 2 {
 		// Corrupt awakening nibble on a released branch: keep the branch and
-		// re-pick a configured stage the .chr table actually has.
-		if stage, ok := availableAwakening(statTables[job], first, growTypes, randIntn); ok {
+		// re-pick a stage the level opens and the .chr table actually has.
+		if stage, ok := availableAwakening(statTables[job], first, stages, randIntn); ok {
 			target := (stage << 4) | (first & 0x0F)
 			if target == grow {
 				return 0, false
@@ -115,7 +127,7 @@ func reconciledGrow(job, grow int, growTypes []int, branches []int, statTables m
 	if second != 0 || !reconcileAwakening {
 		return 0, false
 	}
-	stage, ok := availableAwakening(statTables[job], first, growTypes, randIntn)
+	stage, ok := availableAwakening(statTables[job], first, stages, randIntn)
 	if !ok {
 		return 0, false
 	}

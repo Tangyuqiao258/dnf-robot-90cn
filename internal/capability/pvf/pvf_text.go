@@ -40,6 +40,28 @@ func pvfSectionInts(body, tag string) []int {
 	return nil
 }
 
+// pvfTagInt returns the first positive integer written under one [tag] of a PVF
+// body. The value may follow the tag on the same line or sit on the lines below
+// it; the scan stops at the next tag either way.
+func pvfTagInt(body, tag string) int {
+	lower := strings.ToLower(body)
+	want := "[" + strings.ToLower(strings.TrimSpace(tag)) + "]"
+	index := strings.Index(lower, want)
+	if index < 0 {
+		return 0
+	}
+	rest := body[index+len(want):]
+	if next := strings.Index(rest, "["); next >= 0 {
+		rest = rest[:next]
+	}
+	for _, field := range strings.Fields(strings.ReplaceAll(rest, "`", "")) {
+		if value, err := strconv.Atoi(field); err == nil && value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
 func containsInt(values []int, want int) bool {
 	for _, value := range values {
 		if value == want {

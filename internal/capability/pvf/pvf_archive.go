@@ -338,8 +338,9 @@ func extractMapListFromText(readText func(string) string, listPath, prefix strin
 	// read once here, and the Seria-exit pass below needs the room's portal
 	// table only after every area has been projected.
 	type projectedArea struct {
-		item shared.MapCatalogItem
-		body string
+		item       shared.MapCatalogItem
+		body       string
+		dungeonIDs []int
 	}
 	var projected []projectedArea
 	for _, entry := range parsePVFList(readText(listPath)) {
@@ -373,8 +374,30 @@ func extractMapListFromText(readText func(string) string, listPath, prefix strin
 					NormalEligible: boolPointer(normalEligible), StoreEligible: boolPointer(storeEligible), StoreProbe: boolPointer(storeProbe),
 					Links: townMapMovableTargets(mapBody), DungeonGate: area.DungeonGate, GateX: area.GateX, GateY: area.GateY,
 				},
-				body: mapBody,
+				body:       mapBody,
+				dungeonIDs: area.DungeonIDs,
 			})
+		}
+	}
+	// Dungeon entrances: the gate marker names the dungeon, and the dungeon's own
+	// file states the level a character must reach to enter it. Only the dungeons
+	// the world actually opens are read.
+	gateIDs := make([]int, 0, 32)
+	for _, entry := range projected {
+		gateIDs = append(gateIDs, entry.dungeonIDs...)
+	}
+	gateLevels := dungeonEntryLevels(readText, gateIDs)
+	for index := range projected {
+		for _, id := range projected[index].dungeonIDs {
+			level := gateLevels[id]
+			if level <= 0 {
+				continue
+			}
+			// An area may open several dungeons; the entrance a low-level
+			// character can actually walk up to is the one that sets the crowd.
+			if projected[index].item.DungeonLevel == 0 || level < projected[index].item.DungeonLevel {
+				projected[index].item.DungeonLevel = level
+			}
 		}
 	}
 	// Seria-exit pass: the room is the one town map carrying the room marker,

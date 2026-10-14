@@ -71,10 +71,8 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 	for index := 0; index < options.Count; index++ {
 		uid := options.IDStart + index
 		job := chooseInt(options.Config.Jobs, options.RandIntn)
-		firstGrow, grow := SelectJobGrowth(job, options.JobGrows, options.Config.GrowTypes, env.RandIntn)
 		level := env.RandBetween(levels, levelMax)
-		name := robottemplate.AllocateName(uid, job, firstGrow, used, options.Config, options.Names, options.NameExists, options.RandBetween)
-		info := robotcap.Info{UID: uid, Name: name, Level: level, Job: job, Grow: grow, Port: 0, Village: options.Config.SpawnFallbackVillage, Area: options.Config.SpawnArea, X: options.Config.SpawnXMin, Y: options.Config.SpawnYMin}
+		info := robotcap.Info{UID: uid, Level: level, Job: job, Port: 0, Village: options.Config.SpawnFallbackVillage, Area: options.Config.SpawnArea, X: options.Config.SpawnXMin, Y: options.Config.SpawnYMin}
 		if options.Config.SpawnFixed {
 			// Fixed spawns are applied again at online time; keep the legacy
 			// catalog sample so the plan still carries a plausible position.
@@ -94,9 +92,32 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 				info.X, info.Y = x, y
 			}
 		}
-		plans = append(plans, ProtocolRobotPlan{Info: info, Request: shared.ProvisionCharacterRequest{AccountName: fmt.Sprintf("%s%d", options.AccountPrefix, uid), PasswordHash: options.PasswordHash, CharacterName: name, Job: job, RobotUID: uid}})
+		// A robot standing at a dungeon entrance is the crowd a player walks past
+		// on the way in, so it is leveled to the dungeon it guards: a little above
+		// the entry requirement, never below it.
+		if dungeonLevel := dungeonLevelOf(options.Maps, info.Village, info.Area); dungeonLevel > 0 {
+			info.Level = dungeonLevel + env.RandBetween(1, 4)
+		}
+		// The transfer and the awakening follow the level the robot ended up
+		// with, so an entrance guard is grown like the character its level says
+		// it is rather than like the level it was drawn with.
+		firstGrow, grow := SelectJobGrowth(job, info.Level, options.JobGrows, options.Config.GrowTypes, env.RandIntn)
+		info.Grow = grow
+		info.Name = robottemplate.AllocateName(uid, job, firstGrow, used, options.Config, options.Names, options.NameExists, options.RandBetween)
+		plans = append(plans, ProtocolRobotPlan{Info: info, Request: shared.ProvisionCharacterRequest{AccountName: fmt.Sprintf("%s%d", options.AccountPrefix, uid), PasswordHash: options.PasswordHash, CharacterName: info.Name, Job: job, RobotUID: uid}})
 	}
 	return plans, nil
+}
+
+// dungeonLevelOf returns the entry level of the dungeon the map at village/area
+// opens, or zero when that map opens no dungeon whose entry level is known.
+func dungeonLevelOf(maps []shared.MapCatalogItem, village, area int) int {
+	for _, mp := range maps {
+		if mp.Village == village && mp.Area == area {
+			return mp.DungeonLevel
+		}
+	}
+	return 0
 }
 
 type protocolPlanRandom struct {
@@ -146,12 +167,51 @@ func chooseInt(values []int, randIntn func(int) int) int {
 	return values[index]
 }
 
+// Level gates of the game's growth path: a character may transfer at
+// TransferLevel, awaken once at FirstAwakeningLevel and a second time at
+// SecondAwakeningLevel. A fleet grown along these bands looks like characters
+// that actually played instead of a heap of base classes.
+const (
+	TransferLevel        = 15
+	FirstAwakeningLevel  = 50
+	SecondAwakeningLevel = 75
+)
+
+// AwakeningForLevel returns the awakening stage a level opens: none below the
+// first gate, the first awakening from it, and the second from the second gate.
+func AwakeningForLevel(level int) int {
+	switch {
+	case level >= SecondAwakeningLevel:
+		return 2
+	case level >= FirstAwakeningLevel:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// AwakeningStagesForLevel narrows a configured awakening pool to the stage the
+// level band opens. Only a robot below every gate keeps the configured pool,
+// which is the one case the ini still decides.
+func AwakeningStagesForLevel(level int, configured []int) []int {
+	stage := AwakeningForLevel(level)
+	if stage <= 0 {
+		return configured
+	}
+	return []int{stage}
+}
+
 // SelectJobGrowth picks the transfer branch and the packed grow_type for one
-// robot. grow_types selects the awakening stage (0..2); the server rejects an
-// awakening without a transfer, so an untransferable job stays at 0. The first
-// return value is the transfer branch used by name templates.
-func SelectJobGrowth(job int, jobGrows map[int][]int, growTypes []int, randIntn func(int) int) (int, int) {
-	return SelectBranchGrowth(jobGrows[job], growTypes, randIntn)
+// robot at a given level. The level gates both steps: below TransferLevel the
+// robot stays a base class, and the awakening stage follows AwakeningForLevel.
+// The server rejects an awakening without a transfer, so an untransferable job
+// stays at 0. The first return value is the transfer branch used by name
+// templates.
+func SelectJobGrowth(job, level int, jobGrows map[int][]int, growTypes []int, randIntn func(int) int) (int, int) {
+	if level < TransferLevel {
+		return 0, 0
+	}
+	return SelectBranchGrowth(jobGrows[job], AwakeningStagesForLevel(level, growTypes), randIntn)
 }
 
 // SelectBranchGrowth is SelectJobGrowth for a job whose released branch list is

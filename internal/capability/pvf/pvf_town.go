@@ -16,6 +16,9 @@ type townArea struct {
 	// DungeonGate marks an area that hosts dungeon entrances ([dungeon gate]).
 	// Crowd rules pin the disassembler stalls to these areas.
 	DungeonGate bool
+	// DungeonIDs are the dungeons the area's [dungeon gate] markers open, in the
+	// order the markers appear. The ids resolve through dungeon/dungeon.lst.
+	DungeonIDs []int
 	// GateX, GateY is the coordinate the server drops a character on when a
 	// generic area transition targets this area ([gate] x y). Zero means the
 	// area declares no arrival point.
@@ -56,6 +59,9 @@ func parseTownAreas(body string) []townArea {
 				area := townArea{ID: id, MapPath: mapPath, Gate: kind == "gate", Kind: kind}
 				area.MinLevel, area.NeedQuests = townAreaRequirements(block)
 				area.DungeonGate, area.GateX, area.GateY = townAreaArrival(block)
+				if area.DungeonGate {
+					area.DungeonIDs = townAreaDungeonIDs(block)
+				}
 				out = append(out, area)
 			}
 		}
@@ -123,6 +129,35 @@ func townAreaArrival(block string) (dungeonGate bool, gateX, gateY int) {
 		gateX, gateY = atoi(fields[0]), atoi(fields[1])
 	}
 	return dungeonGate, gateX, gateY
+}
+
+// townAreaDungeonIDs collects the dungeon id written after each "[dungeon gate]"
+// marker of one [area] block. A block may declare several entrances, and the
+// marker carries its dungeon as a bare integer before the next tag. Numbers that
+// are not the marker's own -- gate coordinates, quest ids -- follow other tags,
+// so the scan stops at the first tag or the first integer after each marker.
+func townAreaDungeonIDs(block string) []int {
+	flat := strings.ReplaceAll(block, "`", "")
+	const marker = "[dungeon gate]"
+	ids := make([]int, 0, 2)
+	start := 0
+	for {
+		index := strings.Index(flat[start:], marker)
+		if index < 0 {
+			return ids
+		}
+		index += start
+		start = index + len(marker)
+		for _, field := range strings.Fields(flat[start:]) {
+			if strings.HasPrefix(field, "[") {
+				break
+			}
+			if value := atoi(field); value > 0 {
+				ids = append(ids, value)
+				break
+			}
+		}
+	}
 }
 
 // townMapMovableTargets decodes one [town movable area] portal table: six
