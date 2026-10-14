@@ -23,9 +23,17 @@ type textCodec struct {
 	decode *encoding.Decoder
 }
 
+// pvfCodecs are the codecs a PVF body may be written in, outermost first. The
+// installed game is the mainland-China client, so GBK is what its archive holds
+// and it comes first for a reason: a GBK name whose bytes are also valid Big5
+// text decodes to different Han characters under each codec and scores the same
+// under readableScore, so the tie is broken by order. Listing Big5 first
+// reinterpreted every such name (克隆装扮帽子 decoded as 親癒蚾啁簽赽), which
+// silently defeated the catalog's name rules. Big5 stays as a last resort for
+// the Japanese-lineage scripts this robot was adapted from.
 var pvfCodecs = []textCodec{
-	{decode: traditionalchinese.Big5.NewDecoder()},
 	{decode: simplifiedchinese.GBK.NewDecoder()},
+	{decode: traditionalchinese.Big5.NewDecoder()},
 }
 
 func DecodePVFBytes(raw []byte) string {
