@@ -38,3 +38,37 @@ func TestParseJobGrowBranchesIgnoresMissingAndMalformedNames(t *testing.T) {
 		t.Fatalf("section-less branches = %v", branches)
 	}
 }
+
+// The 90CN archive repeats the base class name in a sixth [growtype name]
+// position for jobs 3, 5 and 6 (魔法师, 神枪手, 暗夜使者). Position 5 is not a
+// transfer branch there, so offering it creates characters whose branch the
+// server cannot resolve.
+func TestParseJobGrowBranchesDropsRepeatedBaseClassName(t *testing.T) {
+	body := "[growtype name] `魔法师` `元素师` `召唤师` `战斗法师` `魔道学者` `魔法师`" +
+		"[growtype 1][growtype 2][growtype 3][growtype 4][growtype 5][growtype 6]"
+	if branches := parseJobGrowBranches(body); !reflect.DeepEqual(branches, []int{1, 2, 3, 4}) {
+		t.Fatalf("repeated base name branches = %v", branches)
+	}
+	// A genuinely released fifth branch keeps working: the male mage's 次元行者
+	// differs from its base class name.
+	body = "[growtype name] `魔法师` `元素爆破师` `冰结师` `血法师` `逐风者` `次元行者`" +
+		"[growtype 1][growtype 2][growtype 3][growtype 4][growtype 5][growtype 6]"
+	if branches := parseJobGrowBranches(body); !reflect.DeepEqual(branches, []int{1, 2, 3, 4, 5}) {
+		t.Fatalf("released fifth branch = %v", branches)
+	}
+}
+
+func TestProjectJobGrowNamesKeepsPositionalNames(t *testing.T) {
+	archive := testTextArchive{
+		"character/character.lst": "3 `Mage/Mage.chr`",
+		"character/mage/mage.chr": "[growtype name] `魔法师` `元素师` `//召唤师` `战斗法师`\r\n[growtype 2][growtype 4]",
+	}
+	got := ProjectJobGrowNames(archive)
+	want := map[int][]string{3: {"魔法师", "元素师", "", "战斗法师"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("job grow names = %v, want %v", got, want)
+	}
+	if names := ProjectJobGrowNames(nil); len(names) != 0 {
+		t.Fatalf("nil archive names = %v", names)
+	}
+}

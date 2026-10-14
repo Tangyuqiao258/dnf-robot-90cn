@@ -26,6 +26,32 @@ const maxA21FirstGrow = 5
 // first-grow (transfer) values of that job.
 func ProjectJobGrowCatalog(archive TownTextArchive) map[int][]int {
 	result := make(map[int][]int)
+	for job, names := range projectJobGrowNames(archive) {
+		if branches := releasedGrowBranches(names); len(branches) > 0 {
+			result[job] = branches
+		}
+	}
+	return result
+}
+
+// ProjectJobGrowNames is ProjectJobGrowCatalog with the names kept: the result
+// maps a job id to its [growtype name] list, index 0 the base class and index N
+// the transfer branch whose first-grow value is N. An entry is empty when the
+// .chr declares that position without releasing it. Callers that have to
+// identify a branch by something other than its number (armor mastery, for one)
+// key off these names.
+func ProjectJobGrowNames(archive TownTextArchive) map[int][]string {
+	result := make(map[int][]string)
+	for job, names := range projectJobGrowNames(archive) {
+		if len(names) > 1 {
+			result[job] = names
+		}
+	}
+	return result
+}
+
+func projectJobGrowNames(archive TownTextArchive) map[int][]string {
+	result := make(map[int][]string)
 	if archive == nil {
 		return result
 	}
@@ -40,18 +66,46 @@ func ProjectJobGrowCatalog(archive TownTextArchive) map[int][]int {
 		}
 		path := normalizePVFPath("character/" + match[2])
 		body, _ := archive.ReadText(path)
-		branches := parseJobGrowBranches(body)
-		if len(branches) > 0 {
-			result[job] = branches
+		if names := parseJobGrowNames(body); len(names) > 0 {
+			result[job] = names
 		}
 	}
 	return result
 }
 
-// parseJobGrowBranches reads the [growtype name] line of a .chr file. The
-// first backtick name is the base class; each following name is a transfer
-// branch whose 1-based position is the first-grow value.
+// releasedGrowBranches turns a [growtype name] list into the first-grow values a
+// character may actually take. The server's CharacterStatComputer guards the
+// nibble to maxA21FirstGrow, and parseJobGrowNames blanked every position the
+// .chr does not release.
+func releasedGrowBranches(names []string) []int {
+	branches := make([]int, 0, len(names))
+	for index := 1; index <= maxA21FirstGrow && index < len(names); index++ {
+		if names[index] == "" {
+			continue
+		}
+		branches = append(branches, index)
+	}
+	return branches
+}
+
+// parseJobGrowBranches reads the first-grow values of a .chr file.
 func parseJobGrowBranches(body string) []int {
+	return releasedGrowBranches(parseJobGrowNames(body))
+}
+
+// parseJobGrowNames reads the [growtype name] line of a .chr file. Index 0 is
+// the base class; each following name is a transfer branch whose 1-based
+// position is the first-grow value. A position is blanked when the .chr
+// declares it without releasing it, which the installed archive does three
+// ways:
+//
+//   - a commented placeholder ("//..."),
+//   - the base class name written again — jobs 3, 5, 6 and 11 carry such a
+//     phantom sixth position, and the GM tool's ProfessionCatalog90 skips it
+//     with the same comparison,
+//   - a missing [growtype N] stat section, which the server needs to build the
+//     character's stats.
+func parseJobGrowNames(body string) []string {
 	lower := strings.ToLower(body)
 	start := strings.Index(lower, "[growtype name]")
 	if start < 0 {
@@ -64,26 +118,23 @@ func parseJobGrowBranches(body string) []int {
 	if end := strings.IndexAny(rest, "\r\n"); end >= 0 {
 		rest = rest[:end]
 	}
-	names := pvfBacktickPattern.FindAllStringSubmatch(rest, -1)
-	branches := make([]int, 0, len(names))
-	for index := 1; index < len(names); index++ {
-		name := strings.TrimSpace(names[index][1])
-		// Commented entries mark declared-but-unreleased branches; keep the
-		// positional value for the remaining names without offering them.
-		if name == "" || strings.HasPrefix(name, "//") {
-			continue
-		}
-		if index > maxA21FirstGrow {
-			break
-		}
-		// A branch whose [growtype N] stat section is missing cannot produce
-		// character stats (the server requires that row), so do not offer it.
-		if !hasPVFTag(body, "growtype "+strconv.Itoa(index+1)) {
-			continue
-		}
-		branches = append(branches, index)
+	matches := pvfBacktickPattern.FindAllStringSubmatch(rest, -1)
+	if len(matches) == 0 {
+		return nil
 	}
-	return branches
+	names := make([]string, 0, len(matches))
+	for _, match := range matches {
+		names = append(names, strings.TrimSpace(match[1]))
+	}
+	base := names[0]
+	for index := 1; index < len(names); index++ {
+		name := names[index]
+		if name == "" || strings.HasPrefix(name, "//") || strings.EqualFold(name, base) ||
+			!hasPVFTag(body, "growtype "+strconv.Itoa(index+1)) {
+			names[index] = ""
+		}
+	}
+	return names
 }
 
 func hasPVFTag(body, tag string) bool {
