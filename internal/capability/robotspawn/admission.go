@@ -52,3 +52,16 @@ func CrowdExempt(policy shared.CrowdMapPolicy, village, area int) bool {
 	}
 	return policy.CrowdMapRule(village, area).CrowdExempt
 }
+
+// CrowdStallStation reports whether a map is one the crowd rules still want a
+// stall dummy for: it pins a bounded number of stalls of that trade and none of
+// them stands there yet. Ordinary maps are never a station, since their stall
+// count is unlimited and answering yes for them would fill the world with
+// disassemblers instead of the entrances the rules single out.
+func CrowdStallStation(policy shared.CrowdMapPolicy, village, area int, kind shared.ExpertJobStoreKind, held int) bool {
+	if policy == nil || kind == shared.ExpertJobStoreNone {
+		return false
+	}
+	rule := policy.CrowdMapRule(village, area)
+	return rule.StallMax > 0 && rule.AllowsStall(kind, held)
+}

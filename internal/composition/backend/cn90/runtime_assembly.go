@@ -37,6 +37,10 @@ type RuntimeBundle struct {
 	AdminToken     string
 	TownMaps       []shared.MapCatalogItem
 	FollowAccounts FollowAccountLocator
+	// CrowdRules is the world's one per-map population policy. The scheduler and
+	// the creator share this instance, so a player-town update reaches both the
+	// placement of running robots and the planning of new ones.
+	CrowdRules *CrowdRules
 }
 
 // Close releases the adapter-owned resources in shutdown order.
@@ -199,11 +203,13 @@ func ComposeRuntime(ctx context.Context, opts RuntimeComposeOptions) (RuntimeBun
 	bundle.AdminAddress = adminAddress
 	bundle.AdminToken = adminToken
 	bundle.TownMaps = catalogs.TownMaps
+	bundle.CrowdRules = NewCrowdRules(catalogs.TownMaps)
 	bundle.FollowAccounts = FollowAccountLocator{DatabasePath: databasePath}
 	bundle.Creator = RobotCreator{
 		Provisioner: Provisioner{ConnectHost: opts.ConnectIP, Channels: channels, Binder: binder},
 		BatchStore:  state, IdentityStore: state, RobotCatalog: state,
 		Config: opts.Config, Names: names, Maps: catalogs.TownMaps, JobGrows: catalogs.JobGrows,
+		CrowdPolicy:   bundle.CrowdRules,
 		AccountPrefix: prefix, IDStart: opts.Config.RobotUIDStart,
 		RandIntn: opts.RandIntn, RandBetween: opts.RandBetween,
 		Loadouts: loadouts, Profiles: loadouts,

@@ -36,6 +36,8 @@ type RobotCreator struct {
 	RandBetween   func(int, int) int
 	Loadouts      CharacterLoadoutApplier
 	Profiles      CharacterProfileReader
+	// CrowdPolicy stations a new robot on a map its trade has a market on.
+	CrowdPolicy shared.CrowdMapPolicy
 }
 
 func (c RobotCreator) CreateRobots(ctx context.Context, request robotcap.CreateRequest) ([]robotcap.Info, error) {
@@ -80,7 +82,8 @@ func (c RobotCreator) CreateRobots(ctx context.Context, request robotcap.CreateR
 		plans, err := robotlifecycle.BuildProtocolRobotPlans(robotlifecycle.ProtocolPlanOptions{
 			Count: 1, IDStart: uid, AccountPrefix: c.AccountPrefix,
 			PasswordHash: c.PasswordHash, Config: c.Config, Names: c.Names, Maps: c.Maps, JobGrows: c.JobGrows, Locations: planLocations,
-			RandIntn: c.RandIntn, RandBetween: c.RandBetween,
+			CrowdPolicy: c.CrowdPolicy,
+			RandIntn:    c.RandIntn, RandBetween: c.RandBetween,
 			NameExists: nameTaken,
 		})
 		if err != nil {

@@ -21,3 +21,20 @@ func (k ExpertJobStoreKind) Name() string {
 		return "none"
 	}
 }
+
+// ExpertJobStoreKindForUID picks the expert-job trade a robot holds from its uid
+// and the configured enchanting share. A character holds one profession for
+// life, so both the store cycle and the placement that stations a robot have to
+// read the same choice from the same inputs.
+func ExpertJobStoreKindForUID(uid, enchantRatioPercent int) ExpertJobStoreKind {
+	if enchantRatioPercent <= 0 {
+		return ExpertJobStoreDisjoint
+	}
+	if enchantRatioPercent >= 100 {
+		return ExpertJobStoreEnchant
+	}
+	if uid > 0 && uid%100 < enchantRatioPercent {
+		return ExpertJobStoreEnchant
+	}
+	return ExpertJobStoreDisjoint
+}

@@ -21,8 +21,12 @@ type ProtocolPlanOptions struct {
 	// Locations is the current robot directory occupancy. Non-fixed spawns
 	// use it to pick the least crowded usable area instead of sampling raw
 	// map-catalog entries.
-	Locations   []shared.MapLocation
-	JobGrows    map[int][]int
+	Locations []shared.MapLocation
+	JobGrows  map[int][]int
+	// CrowdPolicy lets the plan station a new robot on a map the world's rules
+	// reserve for its trade. A plan built without one spreads robots exactly as
+	// it did before the rules existed.
+	CrowdPolicy shared.CrowdMapPolicy
 	NameExists  func(string) bool
 	RandIntn    func(int) int
 	RandBetween func(int, int) int
@@ -59,7 +63,7 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 	}
 	plans := make([]ProtocolRobotPlan, 0, options.Count)
 	used := make(map[string]struct{}, options.Count)
-	env := protocolPlanRandom{randIntn: options.RandIntn, randBetween: options.RandBetween}
+	env := protocolPlanRandom{randIntn: options.RandIntn, randBetween: options.RandBetween, policy: options.CrowdPolicy}
 	spawnMaps := options.Maps
 	if !options.Config.SpawnFixed {
 		spawnMaps = robotspawn.NormalMaps(options.Maps)
@@ -80,7 +84,7 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 					info.X, info.Y = x, y
 				}
 			}
-		} else if target, ok := robotspawn.BalancedFamilyLocation(env, spawnMaps, level, options.Locations, shared.MapAreaKey{}); ok {
+		} else if target, ok := robotspawn.BalancedFamilyLocation(env, spawnMaps, level, options.Locations, shared.MapAreaKey{}, shared.ExpertJobStoreKindForUID(uid, options.Config.StoreEnchantRatioPercent)); ok {
 			info.Village, info.Area = target.Map.Village, target.Map.Area
 			info.X, info.Y = target.X, target.Y
 			options.Locations = append(options.Locations, shared.MapLocation{Village: info.Village, Area: info.Area, X: info.X, Y: info.Y})
@@ -98,9 +102,19 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 type protocolPlanRandom struct {
 	randIntn    func(int) int
 	randBetween func(int, int) int
+	policy      shared.CrowdMapPolicy
 }
 
 func (protocolPlanRandom) FollowAccountVillage(string) (int, bool, error) { return 0, false, nil }
+
+// CrowdMapRule keeps a planned spawn out of the maps the crowd rules close and
+// out of the markets another robot already holds.
+func (r protocolPlanRandom) CrowdMapRule(village, area int) shared.CrowdMapRule {
+	if r.policy == nil {
+		return shared.CrowdMapRule{}
+	}
+	return r.policy.CrowdMapRule(village, area)
+}
 
 func (r protocolPlanRandom) RandIntn(n int) int {
 	if n <= 0 || r.randIntn == nil {

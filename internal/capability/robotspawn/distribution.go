@@ -280,7 +280,11 @@ func MapFamilyKey(mp shared.MapCatalogItem) string {
 // map families (unique geometry) by density and picks the least crowded mirror
 // instance inside the chosen family. currentArea (when set) is avoided for the
 // instance pick so a relocation actually changes map.
-func BalancedFamilyLocation(env RangeRandom, maps []shared.MapCatalogItem, level int, locations []shared.MapLocation, currentArea shared.MapAreaKey) (BalancedTarget, bool) {
+//
+// wanted is the expert-job trade the robot being placed holds, or None when the
+// caller does not know it. A trade the crowd rules pin to particular maps sends
+// the robot to those maps first, one per market, before ordinary spreading.
+func BalancedFamilyLocation(env RangeRandom, maps []shared.MapCatalogItem, level int, locations []shared.MapLocation, currentArea shared.MapAreaKey, wanted shared.ExpertJobStoreKind) (BalancedTarget, bool) {
 	type family struct {
 		key        string
 		weight     int
@@ -330,6 +334,29 @@ func BalancedFamilyLocation(env RangeRandom, maps []shared.MapCatalogItem, level
 			return BalancedTarget{}, false
 		}
 		return BalancedTarget{Map: candidate.mp, X: x, Y: y}, true
+	}
+
+	// Markets first: a robot whose trade the rules pin to particular maps is
+	// stationed where that trade can open, one robot per map, before ordinary
+	// spreading starts. Without this an enchanter lands wherever the draw puts
+	// it and never opens the stall its trade exists for.
+	stations := make([]mapCandidate, 0, len(maps))
+	for _, group := range order {
+		for _, candidate := range group.candidates {
+			if areaCounts[mapAreaKey(candidate.mp)] > 0 {
+				continue
+			}
+			if CrowdStallStation(policy, candidate.mp.Village, candidate.mp.Area, wanted, 0) {
+				stations = append(stations, candidate)
+			}
+		}
+	}
+	if len(stations) > 0 {
+		indexes := make([]int, len(stations))
+		for index := range indexes {
+			indexes[index] = index
+		}
+		return targetFrom(stations[randomIndex(env, indexes)])
 	}
 
 	// Coverage first: every enterable map should hold robots before any map

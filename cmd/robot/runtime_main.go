@@ -86,7 +86,7 @@ func runBackend(cfg *config.SysConfig, paths layout.Paths, info shared.BackendIn
 	// The crowd rules come from the same projected town catalog the adapter hands
 	// the scheduler, so placement, relocation and stall selection all read one
 	// policy instead of three drifting copies of the map list.
-	manager.SetCrowdMapPolicy(cn90backend.NewCrowdRules(bundle.TownMaps))
+	manager.SetCrowdMapPolicy(bundle.CrowdRules)
 	manager.SetBackendStoreRuntime(bundle.Transport)
 	manager.SetBackendExpertJobProfessionWriter(bundle.Loadouts)
 	manager.SetBackendAccountOnlineChecker(bundle.Transport)

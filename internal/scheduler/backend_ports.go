@@ -144,7 +144,8 @@ func (d protocolSessionDriver) PrepareOnline(info robotcap.Info, rc robotconfig.
 	// town (1/0), an event/housing area, or pile up in a single map. None of
 	// those are stable homes, so pick a capacity-balanced regular town and
 	// record it immediately so concurrent decisions see the same occupancy.
-	if target, ok := robotspawn.BalancedFamilyLocation(spawnEnv{manager: d.manager}, spawnMaps, info.Level, locations, shared.MapAreaKey{Village: info.Village, Area: info.Area}); ok {
+	trade := d.manager.expertJobStoreKindForUID(info.UID, rc)
+	if target, ok := robotspawn.BalancedFamilyLocation(spawnEnv{manager: d.manager}, spawnMaps, info.Level, locations, shared.MapAreaKey{Village: info.Village, Area: info.Area}, trade); ok {
 		robotLogf("[SpawnRepair] uid=%d cid=%d level=%d from=%d/%d -> %d/%d/%d/%d crowded=%t\n",
 			info.UID, info.CID, info.Level, info.Village, info.Area, target.Map.Village, target.Map.Area, target.X, target.Y, crowded)
 		info.Village, info.Area = target.Map.Village, target.Map.Area

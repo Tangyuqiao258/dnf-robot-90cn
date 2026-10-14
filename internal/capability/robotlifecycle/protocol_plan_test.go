@@ -3,6 +3,7 @@ package robotlifecycle
 import (
 	"testing"
 
+	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
 	robottemplate "robot/internal/capability/robottemplate"
 	"robot/internal/shared"
@@ -68,6 +69,55 @@ func TestBuildProtocolRobotPlansBalancesSpawnAreas(t *testing.T) {
 	}
 	if first.Village == 1 && first.Area == 0 {
 		t.Fatalf("plan kept the fallback default instead of a catalog map: %+v", first)
+	}
+}
+
+// planPolicy is a two-map world: 2/9 is an enchanting market, 4/1 is an
+// ordinary map that comes first in the catalog, so a plan that lands on 2/9 can
+// only have got there through the crowd rules.
+type planPolicy struct{}
+
+func (planPolicy) CrowdMapRule(village, area int) shared.CrowdMapRule {
+	if village == 2 && area == 9 {
+		return shared.CrowdMapRule{StallKind: shared.ExpertJobStoreEnchant, StallMax: 1}
+	}
+	return shared.CrowdMapRule{StallKind: shared.ExpertJobStoreDisjoint, StallMax: shared.CrowdStallUnlimited}
+}
+
+func planMarketMaps() []shared.MapCatalogItem {
+	return []shared.MapCatalogItem{
+		{Village: 4, Area: 1, Level: 1, Use: true, Rectangles: []shared.MapRectangle{{XMin: 0, XMax: 100, YMin: 0, YMax: 100}}},
+		{Village: 2, Area: 9, Level: 1, Use: true, Rectangles: []shared.MapRectangle{{XMin: 200, XMax: 300, YMin: 0, YMax: 100}}},
+	}
+}
+
+func TestBuildProtocolRobotPlansStationsTheTradeOnItsMarket(t *testing.T) {
+	plan := func(t *testing.T, enchantRatio int) robotcap.Info {
+		t.Helper()
+		plans, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
+			Count: 1, IDStart: 17001000, AccountPrefix: "acct",
+			Config: robotconfig.RuntimeConfig{
+				LevelMin: 80, LevelMax: 80, Jobs: []int{0}, GrowTypes: []int{0},
+				SpawnFallbackVillage: 1, StoreEnchantRatioPercent: enchantRatio,
+			},
+			Names:       robottemplate.NameTemplates{Common: []string{"Alpha"}},
+			Maps:        planMarketMaps(),
+			CrowdPolicy: planPolicy{},
+			RandIntn:    func(int) int { return 0 },
+			RandBetween: func(min, max int) int { return min },
+		})
+		if err != nil || len(plans) != 1 {
+			t.Fatalf("plans=%+v err=%v", plans, err)
+		}
+		return plans[0].Info
+	}
+	// uid 17001000 % 100 = 0, so a 19% share makes this robot an enchanter.
+	if info := plan(t, 19); info.Village != 2 || info.Area != 9 {
+		t.Fatalf("enchanter planned at %d/%d, want its market 2/9", info.Village, info.Area)
+	}
+	// Without a share the robot disassembles, and 2/9 is not its market.
+	if info := plan(t, 0); info.Village == 2 && info.Area == 9 {
+		t.Fatalf("disassembler planned on the enchanting market: %d/%d", info.Village, info.Area)
 	}
 }
 

@@ -533,17 +533,7 @@ func (m *RobotManager) expertJobStoreReasonRetryable(kind shared.ExpertJobStoreK
 // deterministic per UID so a character keeps one profession instead of
 // swapping jobs on every store cycle.
 func (m *RobotManager) expertJobStoreKindForUID(uid int, rc robotconfig.RuntimeConfig) shared.ExpertJobStoreKind {
-	ratio := rc.StoreEnchantRatioPercent
-	if ratio <= 0 {
-		return shared.ExpertJobStoreDisjoint
-	}
-	if ratio >= 100 {
-		return shared.ExpertJobStoreEnchant
-	}
-	if uid > 0 && uid%100 < ratio {
-		return shared.ExpertJobStoreEnchant
-	}
-	return shared.ExpertJobStoreDisjoint
+	return shared.ExpertJobStoreKindForUID(uid, rc.StoreEnchantRatioPercent)
 }
 
 var errSchedulerStorageUnavailable = errors.New("scheduler robot state directory is not configured")
