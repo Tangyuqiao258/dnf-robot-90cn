@@ -89,7 +89,7 @@ func DistributedTargets(env RangeRandom, maps []shared.MapCatalogItem, levels []
 
 		candidate := candidates[chosen]
 		area := mapAreaKey(candidate.mp)
-		x, y, pointOK := bestRandomPoint(env, candidate.rectangles, areaLocations[area])
+		x, y, pointOK := bestRandomPoint(env, candidate.rectangles, areaLocations[area], ArrivalGateOf(candidate.mp))
 		if !pointOK {
 			continue
 		}
@@ -142,22 +142,39 @@ func leastLoadedMapIndex(env RangeRandom, candidates []mapCandidate, indexes []i
 	return randomIndex(env, best)
 }
 
-func bestRandomPoint(env RangeRandom, rectangles []shared.MapRectangle, occupied []shared.MapLocation) (int, int, bool) {
+// bestRandomPoint draws up to eight points and returns the one farthest from
+// the robots already standing in the map. Points inside the map's arrival gate
+// are passed over while any other draw is available, so a player teleporting in
+// does not land on top of a robot.
+func bestRandomPoint(env RangeRandom, rectangles []shared.MapRectangle, occupied []shared.MapLocation, gate ArrivalGate) (int, int, bool) {
 	candidateCount := 1
-	if len(occupied) > 0 {
+	if len(occupied) > 0 || gate.Radius > 0 {
 		candidateCount = 8
 	}
 	bestX, bestY := 0, 0
 	bestDistance := int64(-1)
+	fallbackX, fallbackY := 0, 0
+	fallbackDistance := int64(-1)
 	for index := 0; index < candidateCount; index++ {
 		x, y, ok := randomPointFromNormalized(env, rectangles)
 		if !ok {
 			return 0, 0, false
 		}
 		distance := nearestDistanceSquared(x, y, occupied)
+		if distance > fallbackDistance {
+			fallbackX, fallbackY, fallbackDistance = x, y, distance
+		}
+		if gate.KeepsOut(x, y) {
+			continue
+		}
 		if distance > bestDistance {
 			bestX, bestY, bestDistance = x, y, distance
 		}
+	}
+	if bestDistance < 0 {
+		// Every draw landed on the arrival pad. A robot sharing the pad with
+		// the player beats a map the placement gave up on.
+		return fallbackX, fallbackY, fallbackDistance >= 0
 	}
 	return bestX, bestY, true
 }
@@ -329,7 +346,7 @@ func BalancedFamilyLocation(env RangeRandom, maps []shared.MapCatalogItem, level
 				occupied = append(occupied, location)
 			}
 		}
-		x, y, pointOK := bestRandomPoint(env, candidate.rectangles, occupied)
+		x, y, pointOK := bestRandomPoint(env, candidate.rectangles, occupied, ArrivalGateOf(candidate.mp))
 		if !pointOK {
 			return BalancedTarget{}, false
 		}
