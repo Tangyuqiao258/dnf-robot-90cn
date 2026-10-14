@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	equipmentcap "robot/internal/capability/equipment"
@@ -13,10 +14,10 @@ import (
 
 // TestZZProbeGrantBlock runs the item grant gate against the live archive and
 // asserts the invariant it exists for: every record the client cannot resolve
-// (no [name]), every 勇者 (rarity 5) item, and every name carrying 活动 or 租 is
-// marked GrantBlocked, while the pinned titles and the fleet's ordinary stock
-// survive. It also reports what the gate leaves per job, so a rule that thins
-// the 时装 or gear pools to the point of breaking selection shows up here.
+// (no [name]), every 勇者 (rarity 5) item, and every name carrying 活动, 租 or
+// 克隆 is marked GrantBlocked, while the pinned titles and the fleet's ordinary
+// stock survive. It also reports what the gate leaves per job, so a rule that
+// thins the 时装 or gear pools to the point of breaking selection shows up here.
 // Enable with CN90_PROBE_GRANTBLOCK=1.
 func TestZZProbeGrantBlock(t *testing.T) {
 	if os.Getenv("CN90_PROBE_GRANTBLOCK") == "" {
@@ -107,6 +108,39 @@ func TestZZProbeGrantBlock(t *testing.T) {
 	for _, id := range []int{400330105, 400330106} {
 		item, ok := byID[id]
 		say("pinned title %d: present=%v grant_blocked=%v rarity=%d\n", id, ok, item.GrantBlocked, item.Rarity)
+	}
+
+	// The operator ruled that no robot may wear a 克隆 (clone) avatar. This
+	// reports what the fragment reaches -- how many records carry it, which item
+	// types they are and what their paths look like -- so a fragment that would
+	// also stop ordinary gear or 时装 shows up here instead of in the live world.
+	cloneTypes := map[int]int{}
+	cloneBlocked := 0
+	cloneTotal := 0
+	samples := make([]string, 0, 40)
+	for _, list := range [][]shared.EquipmentCatalogItem{items, stackables} {
+		for _, item := range list {
+			if !strings.Contains(item.Name, "克隆") && !strings.Contains(item.Name2, "克隆") {
+				continue
+			}
+			cloneTotal++
+			cloneTypes[item.ItemType]++
+			if item.GrantBlocked {
+				cloneBlocked++
+			}
+			// Sample the records that are not one of the eight 装扮 slots: those
+			// are what a fragment reaching past 装扮 would catch.
+			if item.ItemType < 20 || item.ItemType > 27 {
+				if len(samples) < cap(samples) {
+					samples = append(samples, fmt.Sprintf("%d type=%d rarity=%d blocked=%v name=%q name2=%q path=%s",
+						item.ID, item.ItemType, item.Rarity, item.GrantBlocked, item.Name, item.Name2, item.Path))
+				}
+			}
+		}
+	}
+	say("\n克隆 names: total=%d already_blocked=%d by item type=%v\n", cloneTotal, cloneBlocked, cloneTypes)
+	for _, sample := range samples {
+		say("  克隆 %s\n", sample)
 	}
 
 	say("\n=== what survives, per job ===\n")

@@ -8,7 +8,14 @@ import "strings"
 //     record carries no gameplay data and looks unfinished in a live world.
 //   - 活动: event-only gear and 装扮 that the live world does not run.
 //   - 租: rental items, which the system reclaims.
-var BlockedItemNameFragments = []string{"后续确认", "活动", "租"}
+//   - 克隆: clone 装扮, which the operator barred the fleet from wearing. A scan
+//     of the live archive finds 1300 records carrying it -- the 克隆装扮 and
+//     稀有克隆装扮 pieces of the eight avatar slots, the 克隆装扮礼盒 and the
+//     兑换券 that open into them, and one joke title. They are all clone avatar
+//     stock, so the fragment is stated by name rather than by item type, which
+//     also keeps it independent of parse order: [name] can be read before
+//     [equipment type].
+var BlockedItemNameFragments = []string{"后续确认", "活动", "租", "克隆"}
 
 // ItemNameBlocked reports whether a catalog item name carries a blocked
 // fragment. A nameless record is not this function's business: the catalog
