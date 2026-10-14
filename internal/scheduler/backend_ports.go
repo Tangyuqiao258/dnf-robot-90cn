@@ -134,7 +134,7 @@ func (d protocolSessionDriver) PrepareOnline(info robotcap.Info, rc robotconfig.
 		if !crowded {
 			// Mirror instances count as one logical map: a family can be
 			// over-full even when every single instance looks acceptable.
-			crowded = robotspawn.Crowded(spawnMaps, locations, info.Village, info.Area, spawnCrowdFloor, spawnCrowdBias)
+			crowded = robotspawn.Crowded(spawnMaps, locations, info.Village, info.Area, spawnCrowdFloor, spawnCrowdBias, d.manager.crowdPolicy)
 		}
 	}
 	if valid && !crowded {

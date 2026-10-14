@@ -38,6 +38,7 @@ func ApplyConfiguredLocation(env Env, info *robotcap.Info, rc robotconfig.Runtim
 }
 
 func ApplyVillageLocation(env Env, info *robotcap.Info, village int, rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem) {
+	maps = AdmittedMaps(env, maps)
 	var candidates []shared.MapCatalogItem
 	for _, mp := range maps {
 		if mp.Use && mp.Village == village && mp.Level <= info.Level {
@@ -72,6 +73,7 @@ func ApplyVillageLocation(env Env, info *robotcap.Info, village int, rc robotcon
 }
 
 func RandomMap(env Env, maps []shared.MapCatalogItem, level int) (shared.MapCatalogItem, bool) {
+	maps = AdmittedMaps(env, maps)
 	var candidates []shared.MapCatalogItem
 	for _, mp := range maps {
 		if mp.Use && mp.Village >= 0 && mp.Area >= 0 && mp.Level <= level {

@@ -119,6 +119,7 @@ type RobotManager struct {
 	nameTemplateSnapshot            atomic.Pointer[robottemplate.NameTemplates]
 	supervisor                      *RobotSupervisor
 	storePolicy                     shared.BackendStorePolicy
+	crowdPolicy                     shared.CrowdMapPolicy
 	storeRuntime                    BackendStoreRuntime
 	expertJobProfessionWriter       BackendExpertJobProfessionWriter
 	serverNoticeTrigger             shared.ServerNoticer
@@ -282,6 +283,56 @@ func (m *RobotManager) SetBackendStorePolicy(policy shared.BackendStorePolicy) {
 		return
 	}
 	m.storePolicy = policy
+}
+
+// SetCrowdMapPolicy installs the backend's per-map population policy. Every
+// placement, movement and stall decision reads the same rules, so a map cannot
+// be closed to spawns but open to stalls.
+func (m *RobotManager) SetCrowdMapPolicy(policy shared.CrowdMapPolicy) {
+	if m == nil {
+		return
+	}
+	m.crowdPolicy = policy
+}
+
+// crowdMapRule returns the crowd rule of one map, or the unrestricted rule when
+// the backend installed no policy.
+func (m *RobotManager) crowdMapRule(village, area int) shared.CrowdMapRule {
+	if m == nil || m.crowdPolicy == nil {
+		return shared.CrowdMapRule{}
+	}
+	return m.crowdPolicy.CrowdMapRule(village, area)
+}
+
+// crowdStallAllows reports whether a robot of one kind may open its stall in a
+// map. A manager without a crowd policy allows every map, which keeps the
+// per-robot trade the only rule.
+func (m *RobotManager) crowdStallAllows(village, area int, kind shared.ExpertJobStoreKind) bool {
+	if m == nil || m.crowdPolicy == nil {
+		return true
+	}
+	rule := m.crowdPolicy.CrowdMapRule(village, area)
+	return rule.AllowsStall(kind, m.crowdStallHeld(village, area, kind))
+}
+
+// crowdStallHeld counts the stalls of one kind already open in a map. A stall
+// counts from the moment the session reports it, so two robots racing for the
+// last slot of a map are separated by the first success surfacing in the status
+// map; the point pool separates the rest.
+func (m *RobotManager) crowdStallHeld(village, area int, kind shared.ExpertJobStoreKind) int {
+	held := 0
+	for _, st := range m.runtimeStatusMap() {
+		if st.Village != village || st.Area != area {
+			continue
+		}
+		switch {
+		case kind == shared.ExpertJobStoreEnchant && st.EnchantActive:
+			held++
+		case kind == shared.ExpertJobStoreDisjoint && st.DisjointActive:
+			held++
+		}
+	}
+	return held
 }
 
 // BackendStoreRuntime is the adapter-owned session surface for store actions.

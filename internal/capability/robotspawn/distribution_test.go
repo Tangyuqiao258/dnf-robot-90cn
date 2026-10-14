@@ -98,13 +98,13 @@ func TestCrowdedCountsMirrorInstancesAsOneFamily(t *testing.T) {
 	for index := 0; index < 8; index++ {
 		locations = append(locations, shared.MapLocation{Village: 2, Area: 1 + index%2})
 	}
-	if !Crowded(maps, locations, 2, 1, 4, 2) {
+	if !Crowded(maps, locations, 2, 1, 4, 2, nil) {
 		t.Fatal("mirror family with an empty other village must count as crowded")
 	}
-	if Crowded(maps, nil, 2, 1, 4, 2) {
+	if Crowded(maps, nil, 2, 1, 4, 2, nil) {
 		t.Fatal("empty directory must not be crowded")
 	}
-	if Crowded(maps, locations, 9, 9, 4, 2) {
+	if Crowded(maps, locations, 9, 9, 4, 2, nil) {
 		t.Fatal("unknown area must not be crowded")
 	}
 }

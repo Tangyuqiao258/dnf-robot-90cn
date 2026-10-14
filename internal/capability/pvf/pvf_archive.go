@@ -334,7 +334,14 @@ func extractMapList(a *pvfArchive, listPath, prefix string) []shared.MapCatalogI
 }
 
 func extractMapListFromText(readText func(string) string, listPath, prefix string) []shared.MapCatalogItem {
-	var out []shared.MapCatalogItem
+	// Each projected area keeps the body of its map file: the town map text is
+	// read once here, and the Seria-exit pass below needs the room's portal
+	// table only after every area has been projected.
+	type projectedArea struct {
+		item shared.MapCatalogItem
+		body string
+	}
+	var projected []projectedArea
 	for _, entry := range parsePVFList(readText(listPath)) {
 		_, body := textWithExt(readText, prefix+entry.Path, ".twn", ".map")
 		if body == "" {
@@ -358,13 +365,36 @@ func extractMapListFromText(readText func(string) string, listPath, prefix strin
 			normalEligible := coordinateReady && area.Kind != "pvp"
 			storeEligible := coordinateReady && area.Kind == "normal"
 			storeProbe := coordinateReady && area.Kind == "other"
-			out = append(out, shared.MapCatalogItem{
-				Village: entry.ID, VillageName: villageName, Area: area.ID, Level: level,
-				MinLevel: area.MinLevel, NeedQuests: append([]int(nil), area.NeedQuests...),
-				XMin: xMin, XMax: xMax, YMin: yMin, YMax: yMax, Rectangles: rectangles, Use: coordinateReady, Gate: area.Gate,
-				NormalEligible: boolPointer(normalEligible), StoreEligible: boolPointer(storeEligible), StoreProbe: boolPointer(storeProbe),
+			projected = append(projected, projectedArea{
+				item: shared.MapCatalogItem{
+					Village: entry.ID, VillageName: villageName, Area: area.ID, Level: level,
+					MinLevel: area.MinLevel, NeedQuests: append([]int(nil), area.NeedQuests...),
+					XMin: xMin, XMax: xMax, YMin: yMin, YMax: yMax, Rectangles: rectangles, Use: coordinateReady, Gate: area.Gate,
+					NormalEligible: boolPointer(normalEligible), StoreEligible: boolPointer(storeEligible), StoreProbe: boolPointer(storeProbe),
+					Links: townMapMovableTargets(mapBody), DungeonGate: area.DungeonGate, GateX: area.GateX, GateY: area.GateY,
+				},
+				body: mapBody,
 			})
 		}
+	}
+	// Seria-exit pass: the room is the one town map carrying the room marker,
+	// and its portal table names every map a character lands in when leaving it.
+	for index := range projected {
+		if !townMapIsSeriaRoom(projected[index].body) {
+			continue
+		}
+		for _, exit := range townMapSeriaExits(projected[index].body, projected[index].item.Village) {
+			for mark := range projected {
+				if projected[mark].item.Village == exit.Village && projected[mark].item.Area == exit.Area {
+					projected[mark].item.SeriaExit = true
+				}
+			}
+		}
+		break
+	}
+	out := make([]shared.MapCatalogItem, 0, len(projected))
+	for _, entry := range projected {
+		out = append(out, entry.item)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Village == out[j].Village {

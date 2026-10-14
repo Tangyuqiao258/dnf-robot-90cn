@@ -83,6 +83,10 @@ func runBackend(cfg *config.SysConfig, paths layout.Paths, info shared.BackendIn
 	}
 	manager.ConfigureBackendRuntime(info, cn90backend.NewPersistenceInspector(bundle.DatabasePath), nil)
 	manager.SetBackendStorePolicy(cn90backend.StorePolicy{})
+	// The crowd rules come from the same projected town catalog the adapter hands
+	// the scheduler, so placement, relocation and stall selection all read one
+	// policy instead of three drifting copies of the map list.
+	manager.SetCrowdMapPolicy(cn90backend.NewCrowdRules(bundle.TownMaps))
 	manager.SetBackendStoreRuntime(bundle.Transport)
 	manager.SetBackendExpertJobProfessionWriter(bundle.Loadouts)
 	manager.SetBackendAccountOnlineChecker(bundle.Transport)

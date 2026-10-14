@@ -24,6 +24,8 @@ func DistributedTargets(env RangeRandom, maps []shared.MapCatalogItem, levels []
 	if env == nil || len(levels) == 0 {
 		return nil, false
 	}
+	policy := CrowdPolicy(env)
+	maps = AdmittedMaps(env, maps)
 	candidates := make([]mapCandidate, 0, len(maps))
 	for _, mp := range maps {
 		if !mp.Use || mp.Village < 0 || mp.Area < 0 {
@@ -69,10 +71,10 @@ func DistributedTargets(env RangeRandom, maps []shared.MapCatalogItem, levels []
 	out := make([]BalancedTarget, len(levels))
 	for _, outputIndex := range order {
 		level := levels[outputIndex]
-		emptyAreas := eligibleMapIndexes(candidates, areaCounts, level, true)
+		emptyAreas := eligibleMapIndexes(candidates, areaCounts, level, true, policy)
 		eligible := emptyAreas
 		if len(emptyAreas) == 0 {
-			eligible = eligibleMapIndexes(candidates, areaCounts, level, false)
+			eligible = eligibleMapIndexes(candidates, areaCounts, level, false, policy)
 		}
 		if len(eligible) == 0 {
 			continue
@@ -107,13 +109,16 @@ func BalancedLocation(env RangeRandom, maps []shared.MapCatalogItem, level int, 
 	return targets[0], true
 }
 
-func eligibleMapIndexes(candidates []mapCandidate, counts map[shared.MapAreaKey]int, level int, emptyOnly bool) []int {
+func eligibleMapIndexes(candidates []mapCandidate, counts map[shared.MapAreaKey]int, level int, emptyOnly bool, policy shared.CrowdMapPolicy) []int {
 	eligible := make([]int, 0, len(candidates))
 	for index, candidate := range candidates {
 		if candidate.mp.Level > level {
 			continue
 		}
 		if emptyOnly && counts[mapAreaKey(candidate.mp)] > 0 {
+			continue
+		}
+		if CrowdOccupied(policy, candidate.mp.Village, candidate.mp.Area, counts[mapAreaKey(candidate.mp)]) {
 			continue
 		}
 		eligible = append(eligible, index)
@@ -188,9 +193,13 @@ func mapAreaKey(mp shared.MapCatalogItem) shared.MapAreaKey {
 // Crowded reports whether the map family occupying village/area is denser than
 // the least dense spawn family by the given bias, with a family-size floor.
 // Mirror instances share one family, so a family can be over-full even when
-// every single instance looks acceptable.
-func Crowded(maps []shared.MapCatalogItem, locations []shared.MapLocation, village, area, floor, bias int) bool {
+// every single instance looks acceptable. A map the crowd rules let grow denser
+// than its neighbours is never reported crowded.
+func Crowded(maps []shared.MapCatalogItem, locations []shared.MapLocation, village, area, floor, bias int, policy shared.CrowdMapPolicy) bool {
 	if floor <= 0 || bias <= 0 {
+		return false
+	}
+	if CrowdExempt(policy, village, area) {
 		return false
 	}
 	index := make(map[shared.MapAreaKey]string, len(maps))
@@ -278,6 +287,8 @@ func BalancedFamilyLocation(env RangeRandom, maps []shared.MapCatalogItem, level
 		candidates []mapCandidate
 		count      int
 	}
+	policy := CrowdPolicy(env)
+	maps = AdmittedMaps(env, maps)
 	families := make(map[string]*family, len(maps))
 	order := make([]*family, 0, len(maps))
 	areaCounts := make(map[shared.MapAreaKey]int, len(locations))
@@ -286,6 +297,9 @@ func BalancedFamilyLocation(env RangeRandom, maps []shared.MapCatalogItem, level
 	}
 	for _, mp := range maps {
 		if !mp.Use || mp.Village < 0 || mp.Area < 0 || mp.Level > level {
+			continue
+		}
+		if CrowdOccupied(policy, mp.Village, mp.Area, areaCounts[mapAreaKey(mp)]) {
 			continue
 		}
 		rectangles := NormalizeRectangles(MapRectangles(mp))

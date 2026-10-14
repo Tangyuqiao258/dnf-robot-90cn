@@ -321,6 +321,18 @@ func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, sh
 			break
 		}
 		info.Village, info.Area, info.X, info.Y = pos.Village, pos.Area, pos.X, pos.Y
+		// The trade belongs to the character, the market to the map: a robot
+		// keeps the expert job it was raised with, and a map hosts only the
+		// stalls its crowd rule allows, one apiece where the rule says so. The
+		// claim is released rather than reported, since the point itself is
+		// sound -- the map, not the coordinate, is what refused.
+		if !r.manager.crowdStallAllows(pos.Village, pos.Area, kind) {
+			robotLogf("[STORE_MAP_STALL_REFUSED] uid=%d cid=%d kind=%s point=%s village=%d area=%d\n",
+				uid, info.CID, kind.Name(), pos.PointID, pos.Village, pos.Area)
+			points.Discard(uid, pos)
+			points.Flush()
+			break
+		}
 		var reason string
 		if reuseSession {
 			ok, reason = r.tryExpertStorePositionInCurrentSession(info, kind, shouldStop)

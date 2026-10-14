@@ -245,6 +245,12 @@ func (e storeMaintenanceEnv) RobotLocations() ([]shared.MapLocation, error) {
 	return e.manager.robotLocations()
 }
 
+// CrowdMapRule keeps the restore path from parking a retired stall robot in a
+// map the crowd rules keep empty.
+func (e storeMaintenanceEnv) CrowdMapRule(village, area int) shared.CrowdMapRule {
+	return e.manager.crowdMapRule(village, area)
+}
+
 func (e storeMaintenanceEnv) ResetPrivateStore(uid int) {
 	if e.manager.doll != nil {
 		e.manager.doll.ResetPrivateStore(uid)

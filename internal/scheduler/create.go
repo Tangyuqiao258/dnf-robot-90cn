@@ -76,3 +76,9 @@ func (e spawnEnv) RandBetween(min, max int) int {
 func (e spawnEnv) RandIntn(n int) int {
 	return e.manager.randIntn(n)
 }
+
+// CrowdMapRule carries the world's per-map population policy into the spawn
+// capability, which probes for it instead of taking a package dependency.
+func (e spawnEnv) CrowdMapRule(village, area int) shared.CrowdMapRule {
+	return e.manager.crowdMapRule(village, area)
+}

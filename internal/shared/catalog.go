@@ -84,6 +84,21 @@ type MapCatalogItem struct {
 	NormalEligible *bool          `json:"normal_eligible,omitempty"`
 	StoreEligible  *bool          `json:"store_eligible,omitempty"`
 	StoreProbe     *bool          `json:"store_probe_eligible,omitempty"`
+	// Links is the map's portal table as destination areas: the town graph a
+	// crowd policy walks to measure how many transitions a map sits away from
+	// the player.
+	Links []MapAreaKey `json:"links,omitempty"`
+	// SeriaExit marks a map a character lands in when leaving the Seria room
+	// (the door target plus every return portal). Crowd rules pin the
+	// enchanting stalls to these maps.
+	SeriaExit bool `json:"seria_exit,omitempty"`
+	// DungeonGate marks a map that hosts dungeon entrances. Crowd rules pin the
+	// disassembler stalls to these maps.
+	DungeonGate bool `json:"dungeon_gate,omitempty"`
+	// GateX, GateY is where a character arrives on a generic area transition;
+	// zero means the area declares no arrival point.
+	GateX int `json:"gate_x,omitempty"`
+	GateY int `json:"gate_y,omitempty"`
 }
 
 type MapRectangle struct {
