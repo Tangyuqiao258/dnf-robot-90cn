@@ -23,6 +23,12 @@ type ProtocolPlanOptions struct {
 	// map-catalog entries.
 	Locations []shared.MapLocation
 	JobGrows  map[int][]int
+	// AwakeningRows reports whether a job's .chr carries the [awakening stage]
+	// row that a grow_type of first|stage<<4 selects. It is what lets the 外传
+	// classes awaken: the archive releases no transfer branch for them, so only
+	// the stat table can say the awakening is real. A plan built without it
+	// keeps the conservative rule and never awakens an untransferred robot.
+	AwakeningRows func(job, first, stage int) bool
 	// CrowdPolicy lets the plan station a new robot on a map the world's rules
 	// reserve for its trade. A plan built without one spreads robots exactly as
 	// it did before the rules existed.
@@ -101,7 +107,11 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 		// The transfer and the awakening follow the level the robot ended up
 		// with, so an entrance guard is grown like the character its level says
 		// it is rather than like the level it was drawn with.
-		firstGrow, grow := SelectJobGrowth(job, info.Level, options.JobGrows, options.Config.GrowTypes, env.RandIntn)
+		awakeningRows := AwakeningAvailable(nil)
+		if options.AwakeningRows != nil {
+			awakeningRows = func(first, stage int) bool { return options.AwakeningRows(job, first, stage) }
+		}
+		firstGrow, grow := SelectJobGrowth(job, info.Level, options.JobGrows, options.Config.GrowTypes, awakeningRows, env.RandIntn)
 		info.Grow = grow
 		info.Name = robottemplate.AllocateName(uid, job, firstGrow, used, options.Config, options.Names, options.NameExists, options.RandBetween)
 		plans = append(plans, ProtocolRobotPlan{Info: info, Request: shared.ProvisionCharacterRequest{AccountName: fmt.Sprintf("%s%d", options.AccountPrefix, uid), PasswordHash: options.PasswordHash, CharacterName: info.Name, Job: job, RobotUID: uid}})
@@ -201,22 +211,32 @@ func AwakeningStagesForLevel(level int, configured []int) []int {
 	return []int{stage}
 }
 
+// AwakeningAvailable reports whether one [awakening stage] row exists for a
+// transfer branch. The archive is the only authority on it, because the two
+// ways a character ends up at branch 0 differ: a job the archive releases no
+// transfer branch for can still awaken on its own — the 外传职业 keep their
+// awakening rows in the base [growtype 1] block, which is the block a
+// grow_type of 0 selects — while a job whose branch list is empty for any other
+// reason has no awakening row at all. A nil predicate keeps the conservative
+// rule: an awakening only on a released branch.
+type AwakeningAvailable func(first, stage int) bool
+
 // SelectJobGrowth picks the transfer branch and the packed grow_type for one
 // robot at a given level. The level gates both steps: below TransferLevel the
 // robot stays a base class, and the awakening stage follows AwakeningForLevel.
-// The server rejects an awakening without a transfer, so an untransferable job
-// stays at 0. The first return value is the transfer branch used by name
-// templates.
-func SelectJobGrowth(job, level int, jobGrows map[int][]int, growTypes []int, randIntn func(int) int) (int, int) {
+// The server rejects an awakening it cannot compute stats for, so `available`
+// has the last word on whether the stage stands. The first return value is the
+// transfer branch used by name templates.
+func SelectJobGrowth(job, level int, jobGrows map[int][]int, growTypes []int, available AwakeningAvailable, randIntn func(int) int) (int, int) {
 	if level < TransferLevel {
 		return 0, 0
 	}
-	return SelectBranchGrowth(jobGrows[job], AwakeningStagesForLevel(level, growTypes), randIntn)
+	return SelectBranchGrowth(jobGrows[job], AwakeningStagesForLevel(level, growTypes), available, randIntn)
 }
 
 // SelectBranchGrowth is SelectJobGrowth for a job whose released branch list is
 // already resolved.
-func SelectBranchGrowth(branches []int, growTypes []int, randIntn func(int) int) (int, int) {
+func SelectBranchGrowth(branches []int, growTypes []int, available AwakeningAvailable, randIntn func(int) int) (int, int) {
 	first := chooseFirstGrow(branches, randIntn)
 	awakening := chooseInt(growTypes, randIntn)
 	if awakening < 0 {
@@ -225,10 +245,22 @@ func SelectBranchGrowth(branches []int, growTypes []int, randIntn func(int) int)
 	if awakening > 2 {
 		awakening = 2
 	}
-	if first == 0 {
+	if awakening > 0 && !awakeningReleased(branches, first, awakening, available) {
 		awakening = 0
 	}
 	return first, (awakening << 4) | (first & 0x0F)
+}
+
+// awakeningReleased reports whether the archive can grow branch `first` to
+// `stage`. A predicate from the archive decides it outright; without one, the
+// branch list is all that is known, and a job whose branches are released has
+// an awakening row under each of them while an untransferred character has
+// none.
+func awakeningReleased(branches []int, first, stage int, available AwakeningAvailable) bool {
+	if available != nil {
+		return available(first, stage)
+	}
+	return first != 0 && len(branches) > 0
 }
 
 // chooseFirstGrow picks a transfer branch from the job's PVF grow catalog. The

@@ -59,8 +59,13 @@ type SQLiteLoadoutApplier struct {
 	// Stackables is the projected stackable catalog. The auction stock stage
 	// resolves its pool ids through it for the item's PVF path, attach type and
 	// stack limit.
-	Stackables   []shared.EquipmentCatalogItem
-	QuestGates   capabilitypvf.QuestGates
+	Stackables []shared.EquipmentCatalogItem
+	QuestGates capabilitypvf.QuestGates
+	// Amplify carries the archive's amplification tables. A zero value is the
+	// "no amplification" state: InitialValue returns 0, and the loadout writer
+	// writes no amplify extras rather than a zero the client would draw as a
+	// real option.
+	Amplify      capabilitypvf.AmplifyConfig
 	PVFPath      string
 	RandIntn     func(int) int
 	db           *sql.DB

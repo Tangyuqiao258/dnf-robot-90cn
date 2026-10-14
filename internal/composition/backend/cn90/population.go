@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	equipmentcap "robot/internal/capability/equipment"
 	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
 	"robot/internal/shared"
@@ -280,15 +281,12 @@ func (p SQLitePopulationInspector) expectedWornSlots() map[int]struct{} {
 }
 
 func (p SQLitePopulationInspector) expectedAvatarSlots() map[int]struct{} {
-	slots := p.Config.AvatarSlots
-	if len(slots) == 0 {
-		slots = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-	}
+	// The same slot list selection uses, so the panel cannot report a robot as
+	// incomplete over a slot — 皮肤 — that is deliberately never filled.
+	slots := equipmentcap.AvatarSlotsInUse(p.Config.AvatarSlots)
 	expected := make(map[int]struct{}, len(slots))
 	for _, slot := range slots {
-		if slot >= 0 && slot <= 9 {
-			expected[slot] = struct{}{}
-		}
+		expected[slot] = struct{}{}
 	}
 	return expected
 }

@@ -67,12 +67,13 @@ func TestArmorMaterialsForReadsTheTransferBranch(t *testing.T) {
 func TestDarkKnightArmorExcludesLeather(t *testing.T) {
 	rc := robotconfig.Default()
 	rc.EquipSlots = []int{3}
-	rc.EquipRarityMin, rc.EquipRarityMax = 0, 5
 	rc.PreferEquipSets = false
+	// Level 50 sits in the 36..70 band, whose gear is 神器: the band, not
+	// equip_rarity_min/max, is what the pool is drawn from.
 	items := []shared.EquipmentCatalogItem{
-		{ID: 1, ItemType: 3, Level: 50, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/a.equ"},
-		{ID: 2, ItemType: 3, Level: 50, UseJob: []int{100}, Path: "equipment/character/common/jacket/leather/b.equ"},
-		{ID: 3, ItemType: 3, Level: 50, UseJob: []int{100}, Path: "equipment/character/common/jacket/harmor/c.equ"},
+		{ID: 1, ItemType: 3, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/a.equ"},
+		{ID: 2, ItemType: 3, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/jacket/leather/b.equ"},
+		{ID: 3, ItemType: 3, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/jacket/harmor/c.equ"},
 	}
 	selected := SelectEquipment(items, 50, 9, 0, rc, func(int) int { return 0 })
 	if selected[3].ID != 1 {
@@ -135,13 +136,12 @@ func TestArmorMaterialOfPathReadsTheItemDirectory(t *testing.T) {
 func TestSelectEquipmentRestrictsArmorToTheMasteredMaterial(t *testing.T) {
 	rc := robotconfig.Default()
 	rc.EquipSlots = []int{3, 5}
-	rc.EquipRarityMin, rc.EquipRarityMax = 0, 5
 	rc.PreferEquipSets = false
 	items := []shared.EquipmentCatalogItem{
-		{ID: 1, ItemType: 3, Level: 50, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/coat_a.equ"},
-		{ID: 2, ItemType: 3, Level: 50, UseJob: []int{100}, Path: "equipment/character/common/jacket/plate/coat_b.equ"},
-		{ID: 3, ItemType: 5, Level: 50, UseJob: []int{100}, Path: "equipment/character/common/pants/harmor/pants_a.equ"},
-		{ID: 4, ItemType: 5, Level: 50, UseJob: []int{100}, Path: "equipment/character/common/pants/plate/pants_b.equ"},
+		{ID: 1, ItemType: 3, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/coat_a.equ"},
+		{ID: 2, ItemType: 3, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/jacket/plate/coat_b.equ"},
+		{ID: 3, ItemType: 5, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/pants/harmor/pants_a.equ"},
+		{ID: 4, ItemType: 5, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/pants/plate/pants_b.equ"},
 	}
 	// 阿修罗: branch 4 of the male swordman, plate only.
 	selected := SelectEquipment(items, 50, 0, 0x04, rc, func(int) int { return 0 })

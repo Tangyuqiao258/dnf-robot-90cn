@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	equipmentcap "robot/internal/capability/equipment"
 	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
 	"robot/internal/shared"
@@ -128,8 +129,9 @@ func TestRobotLoadoutWritesWornRows(t *testing.T) {
 	config.MinAvatarSlots = 0
 	config.PreferAvatarSets = false
 	config.EquipRarityMax = 5
-	config.EquipIntensifyMin = 7
-	config.EquipIntensifyMax = 10
+	// equip_intensify_min/max no longer decides the reinforcement; the level band
+	// does. The fixture character is level 70, whose band rolls 10..11, and the
+	// applier's random source returns 0, so every item lands on the band's floor.
 	applier, err := NewSQLiteLoadoutApplier(context.Background(), path, config, equipmentTestCatalog(), "", func(int) int { return 0 })
 	if err != nil {
 		t.Fatal(err)
@@ -152,18 +154,25 @@ func TestRobotLoadoutWritesWornRows(t *testing.T) {
 	if err := db.QueryRow(`SELECT group_concat(slot_index, ',') FROM (SELECT slot_index FROM dnf_equipment_entries WHERE character_id='9' ORDER BY slot_index)`).Scan(&slots); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"11", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23"} {
+	// Slot 23 is 耳环, which a level-70 character is not owed: every earring in
+	// the archive needs level 90. TestRobotLoadoutGivesTheEarringOnlyToLevel90
+	// covers the slot itself.
+	for _, want := range []string{"11", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22"} {
 		if !containsIntList(slots, want) {
 			t.Fatalf("worn slots %q missing %s", slots, want)
 		}
 	}
-	// Weapon reinforcement is projected through ext_data0.
+	if containsIntList(slots, "23") {
+		t.Fatalf("worn slots %q carry an earring below level %d", slots, equipmentcap.EarringMinLevel)
+	}
+	// Weapon reinforcement is projected through ext_data0 and comes from the
+	// level band, which for level 70 is 10..11.
 	var reinforce string
 	if err := db.QueryRow(`SELECT extra_value FROM dnf_equipment_entry_extra WHERE character_id='9' AND entry_key='11' AND extra_key='ext_data0'`).Scan(&reinforce); err != nil {
 		t.Fatal(err)
 	}
-	if reinforce != "7" {
-		t.Fatalf("weapon ext_data0 = %q, want 7", reinforce)
+	if reinforce != "10" {
+		t.Fatalf("weapon ext_data0 = %q, want 10", reinforce)
 	}
 	var durability string
 	if err := db.QueryRow(`SELECT extra_value FROM dnf_equipment_entry_extra WHERE character_id='9' AND entry_key='11' AND extra_key='durability'`).Scan(&durability); err != nil {
@@ -200,6 +209,71 @@ func TestRobotLoadoutWritesWornRows(t *testing.T) {
 	}
 	if appearance != "0" {
 		t.Fatalf("avatar appearance slot = %q", appearance)
+	}
+}
+
+// TestRobotLoadoutGivesTheEarringOnlyToLevel90 covers 耳环 against the level
+// gate the operator set. 89 is the boundary worth pinning: it is already inside
+// the band that hands out 史诗 gear, so the earring's absence there is the
+// gate's doing and not the band's.
+func TestRobotLoadoutGivesTheEarringOnlyToLevel90(t *testing.T) {
+	items := []shared.EquipmentCatalogItem{
+		// Level 85 rather than 90 so the coat stays wearable at 89: the applier
+		// refuses a loadout with no compatible items, and the earring is the only
+		// thing this test wants to see appear at the boundary.
+		{ID: 103, Name: "上衣", Path: "equipment/character/common/jacket/cloth/103.equ", ItemType: 3, Level: 85, Rarity: 4, Durability: 30},
+		{ID: 112, Name: "耳环", Path: "equipment/character/common/earring/112.equ", ItemType: 13, Level: 90, Rarity: 4, Durability: 15},
+	}
+	config := robotconfig.Default()
+	config.EquipSlots = []int{3, 13}
+	config.AvatarSlots = []int{0, 1, 2}
+	config.MinAvatarSlots = 0
+	config.PetEnabled = false
+	for _, testCase := range []struct {
+		level int
+		want  int
+	}{
+		{level: 89, want: 0},
+		{level: 90, want: 112},
+	} {
+		path := newEquipmentTestDatabase(t)
+		setEquipmentTestLevel(t, path, testCase.level)
+		applier, err := NewSQLiteLoadoutApplier(context.Background(), path, config, items, "", func(int) int { return 0 })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := applier.applyAccountLoadout(context.Background(), "robot17000009", robotcap.Info{}); err != nil {
+			applier.Close()
+			t.Fatal(err)
+		}
+		applier.Close()
+		db := openPurgeTestDatabase(t, path)
+		var itemID int
+		err = db.QueryRow(`SELECT item_id FROM dnf_equipment_entries WHERE character_id='9' AND slot_index=23`).Scan(&itemID)
+		db.Close()
+		if testCase.want == 0 {
+			if err == nil {
+				t.Fatalf("level %d wore earring %d, want no earring at all", testCase.level, itemID)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("level %d earring lookup: %v", testCase.level, err)
+		}
+		if itemID != testCase.want {
+			t.Fatalf("level %d earring = %d, want %d", testCase.level, itemID, testCase.want)
+		}
+	}
+}
+
+// setEquipmentTestLevel moves the fixture character off the level
+// newEquipmentTestDatabase gives it, so a test can pin a level gate.
+func setEquipmentTestLevel(t *testing.T, path string, level int) {
+	t.Helper()
+	db := openPurgeTestDatabase(t, path)
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE dnf_characters SET level=? WHERE character_id='9'`, level); err != nil {
+		t.Fatal(err)
 	}
 }
 

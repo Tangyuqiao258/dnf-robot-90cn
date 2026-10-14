@@ -94,7 +94,7 @@ func reconciledGrow(job, level, grow int, growTypes []int, branches []int, statT
 	}
 	stages := robotlifecycle.AwakeningStagesForLevel(level, growTypes)
 	if !releasedBranch(branches, first) {
-		pick, target := robotlifecycle.SelectBranchGrowth(branches, stages, randIntn)
+		pick, target := robotlifecycle.SelectBranchGrowth(branches, stages, jobAwakeningRows(statTables, job), randIntn)
 		targetSecond := (target >> 4) & 0x0F
 		if targetSecond > 0 && !statTables[job].AwakenSet[pick+1][targetSecond] {
 			if stage, ok := availableAwakening(statTables[job], pick, stages, randIntn); ok {
@@ -150,6 +150,38 @@ func releasedBranch(branches []int, first int) bool {
 		}
 	}
 	return false
+}
+
+// awakeningRows is the archive's answer to "does this job have this awakening
+// row", shaped for the plan and the reconcile alike. It reads the same
+// AwakenSet matrix the server's charstat loader fills, indexed the same way:
+// a grow_type of first|stage<<4 selects [growtype first+1], so the row that
+// decides the pair is AwakenSet[first+1][stage].
+//
+// The 外传 classes are why this is a table lookup rather than "a branch is
+// needed": they release no transfer branch, and their [awakening 1] and
+// [awakening 2] rows sit in the base block that a grow_type of 0 selects.
+func awakeningRows(statTables map[int]capabilitypvf.CharacterStatTables) func(job, first, stage int) bool {
+	if len(statTables) == 0 {
+		return nil
+	}
+	return func(job, first, stage int) bool {
+		return jobAwakeningRows(statTables, job)(first, stage)
+	}
+}
+
+// jobAwakeningRows is awakeningRows bound to one job, which is the shape the
+// selectors take.
+func jobAwakeningRows(statTables map[int]capabilitypvf.CharacterStatTables, job int) robotlifecycle.AwakeningAvailable {
+	if len(statTables) == 0 {
+		return nil
+	}
+	return func(first, stage int) bool {
+		if first < 0 || stage < 1 || stage > 2 {
+			return false
+		}
+		return statTables[job].AwakenSet[first+1][stage]
+	}
 }
 
 // availableAwakening picks a configured awakening stage whose [awakening N]

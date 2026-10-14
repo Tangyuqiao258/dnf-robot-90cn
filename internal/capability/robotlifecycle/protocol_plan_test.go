@@ -158,11 +158,64 @@ func TestSelectJobGrowthGatesTransferAndAwakeningByLevel(t *testing.T) {
 		{level: 75, branch: 1, grow: 0x21},
 		{level: 90, branch: 1, grow: 0x21},
 	} {
-		branch, grow := SelectJobGrowth(0, testCase.level, jobGrows, configured, func(int) int { return 0 })
+		branch, grow := SelectJobGrowth(0, testCase.level, jobGrows, configured, nil, func(int) int { return 0 })
 		if branch != testCase.branch || grow != testCase.grow {
 			t.Fatalf("level %d grew branch=%d grow=0x%02X, want branch=%d grow=0x%02X",
 				testCase.level, branch, grow, testCase.branch, testCase.grow)
 		}
+	}
+}
+
+// TestSelectJobGrowthSelfAwakensAJobWithNoBranch covers the 外传 classes: the
+// archive releases no transfer branch for them, and their [awakening N] rows
+// sit in the base block a grow_type of 0 selects, so the awakening nibble is
+// theirs to take.
+func TestSelectJobGrowthSelfAwakensAJobWithNoBranch(t *testing.T) {
+	jobGrows := map[int][]int{9: {}, 10: {}}
+	configured := []int{0, 1, 2}
+	rows := func(job, first, stage int) bool {
+		if job != 9 && job != 10 {
+			return false
+		}
+		return first == 0 && stage >= 1 && stage <= 2
+	}
+	jobRows := func(job int) AwakeningAvailable {
+		return func(first, stage int) bool { return rows(job, first, stage) }
+	}
+	for _, testCase := range []struct {
+		level int
+		grow  int
+	}{
+		{level: 49, grow: 0x00},
+		{level: 50, grow: 0x10},
+		{level: 74, grow: 0x10},
+		{level: 75, grow: 0x20},
+		{level: 90, grow: 0x20},
+	} {
+		branch, grow := SelectJobGrowth(9, testCase.level, jobGrows, configured, jobRows(9), func(int) int { return 0 })
+		if branch != 0 || grow != testCase.grow {
+			t.Fatalf("job 9 level %d grew branch=%d grow=0x%02X, want branch=0 grow=0x%02X",
+				testCase.level, branch, grow, testCase.grow)
+		}
+	}
+	// The same job without the archive's word on its awakening rows stays a
+	// plain base class: an awakening the server cannot compute is worse than a
+	// missing one.
+	if _, grow := SelectJobGrowth(9, 90, jobGrows, configured, nil, func(int) int { return 0 }); grow != 0 {
+		t.Fatalf("unverified job 9 grew 0x%02X, want 0x00", grow)
+	}
+}
+
+// TestSelectJobGrowthDropsAnAwakeningTheArchiveDoesNotHave covers a released
+// branch whose stage the .chr does not carry: the selector must fall back to
+// the transfer alone rather than write a grow_type the server refuses.
+func TestSelectJobGrowthDropsAnAwakeningTheArchiveDoesNotHave(t *testing.T) {
+	jobGrows := map[int][]int{0: {1, 2}}
+	configured := []int{2}
+	rows := AwakeningAvailable(func(first, stage int) bool { return false })
+	branch, grow := SelectJobGrowth(0, 90, jobGrows, configured, rows, func(int) int { return 0 })
+	if branch != 1 || grow != 0x01 {
+		t.Fatalf("branch=%d grow=0x%02X, want branch=1 grow=0x01", branch, grow)
 	}
 }
 

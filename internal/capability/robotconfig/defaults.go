@@ -14,7 +14,9 @@ func Default() RuntimeConfig {
 		InventoryCapacity: 16,
 		EquipSlots:        []int{1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}, EquipRarityMin: 0, EquipRarityMax: 5, EquipIntensifyMin: 7, EquipIntensifyMax: 10, EquipSmithingMin: 0, EquipSmithingMax: 8,
 		PreferEquipSets: true, EquipSetMinSlots: 5,
-		AvatarSlots: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, MinAvatarSlots: 8, PreferAvatarSets: true, AvatarSetMinSlots: 6,
+		// 皮肤 (8) is left out: the native creation code never fills it. 光环 (9)
+		// stays, outside the eight-piece 时装 set.
+		AvatarSlots: []int{0, 1, 2, 3, 4, 5, 6, 7, 9}, MinAvatarSlots: 8, PreferAvatarSets: true, AvatarSetMinSlots: 6,
 		PetEnabled: true, PetProbabilityPercent: 80, PetArtifactEnabled: true, PetArtifactSlots: []int{31, 32, 33}, MinPetArtifactSlots: 1, MaxPetArtifactSlots: 2,
 		// Titles stay off: the client animates a title's icon, so the fleet pays
 		// for it every time one is on screen. The two ids are the reference

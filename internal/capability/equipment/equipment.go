@@ -155,10 +155,7 @@ func FilterAvatarSupportedJobs(jobs []int, items []shared.EquipmentCatalogItem, 
 	if len(jobs) == 0 || rc.MinAvatarSlots <= 0 {
 		return append([]int(nil), jobs...)
 	}
-	slots := rc.AvatarSlots
-	if len(slots) == 0 {
-		slots = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-	}
+	slots := AvatarSlotsInUse(rc.AvatarSlots)
 	wantedTypes := make(map[int]struct{}, len(slots))
 	for _, slot := range slots {
 		if slot >= 0 && slot <= 9 {
@@ -250,7 +247,7 @@ func SelectEquipment(items []shared.EquipmentCatalogItem, level int, job, grow i
 	}
 	selected := make(map[int]shared.EquipmentCatalogItem)
 	if rc.PreferEquipSets {
-		selected = SelectSetItems(candidatesBySlot, rc.EquipSetMinSlots, randIntn)
+		selected = SelectFamilySetItems(candidatesBySlot, rc.EquipSetMinSlots, randIntn)
 	}
 	FillRandomItems(selected, candidatesBySlot, randIntn)
 	// Pinned after the draw so it survives both the set pick and the fill. The
@@ -272,17 +269,32 @@ func BestEquipmentLevels(items []shared.EquipmentCatalogItem, level, job, grow i
 
 // equipmentCandidates collects the selectable items per configured slot and
 // the highest selectable item level per slot.
+//
+// The level and rarity the pool is drawn from come from the character's level
+// band, not from the equipment config: the operator states one rarity per band,
+// and a band's rarity is a single value rather than a range, so the retired
+// equip_rarity_min/max keys no longer decide what a robot wears.
 func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow int, rc robotconfig.RuntimeConfig) (map[int][]shared.EquipmentCatalogItem, map[int]int) {
 	slots := rc.EquipSlots
 	if len(slots) == 0 {
 		slots = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 	}
+	// 耳环 is worn on top of the configured slots by a level-90 character, and
+	// only then: below 90 the archive has no earring a character may wear, so
+	// the slot is not offered at all, whether or not equip_slots lists it.
+	if level >= EarringMinLevel {
+		slots = appendWornSlot(slots, EarringItemType)
+	} else {
+		slots = withoutWornSlot(slots, EarringItemType)
+	}
 	materials := ArmorMaterialsFor(job, grow)
+	gearLevel := EquipLevelFor(level)
+	rarity := BandRarityFor(level)
 	candidatesBySlot := make(map[int][]shared.EquipmentCatalogItem, len(slots))
 	slotByItemType := make(map[int]int, len(slots))
 	bestLevelBySlot := make(map[int]int, len(slots))
 	for _, slot := range slots {
-		itemType := SlotToItemType(slot)
+		itemType := WornItemTypeOfSlot(slot)
 		if itemType == 0 {
 			continue
 		}
@@ -291,16 +303,19 @@ func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow i
 	}
 	for _, item := range items {
 		slot, wanted := slotByItemType[item.ItemType]
-		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > level {
+		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > gearLevel {
 			continue
 		}
-		if rc.EquipRarityMax > 0 && (item.Rarity < rc.EquipRarityMin || item.Rarity > rc.EquipRarityMax) {
+		if item.Rarity != rarity {
 			continue
 		}
 		if !UsableByJob(item.UseJob, job) {
 			continue
 		}
 		if !armorAllowed(item, materials) {
+			continue
+		}
+		if !weaponAllowed(item, job, grow) {
 			continue
 		}
 		if item.Level > bestLevelBySlot[slot] {
@@ -311,8 +326,10 @@ func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow i
 	return candidatesBySlot, bestLevelBySlot
 }
 
-func SelectAvatar(items []shared.EquipmentCatalogItem, job int, rc robotconfig.RuntimeConfig, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
-	return PrepareAvatarCatalog(items, rc).Select(job, rc, randIntn)
+// SelectAvatar chooses the 时装 a robot of this level wears. The level is what
+// picks the grade — see AvatarRarityFor for the rule and the band it comes from.
+func SelectAvatar(items []shared.EquipmentCatalogItem, level, job int, rc robotconfig.RuntimeConfig, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+	return PrepareAvatarCatalog(items, rc).Select(level, job, rc, randIntn)
 }
 
 // AvatarCandidateCatalog is a prepared, immutable per-job view of one avatar
@@ -325,7 +342,16 @@ type AvatarCandidateCatalog struct {
 	jobs  map[int]*avatarJobCandidates
 }
 
+// avatarJobCandidates is one job's avatars, split the way selection asks for
+// them: one pool per 时装 grade, and 光环 collected on its own.
 type avatarJobCandidates struct {
+	bands map[int]*avatarBandCandidates
+	aura  []shared.EquipmentCatalogItem
+}
+
+// avatarBandCandidates is one 时装 grade's pool for one job. The bySlot keys are
+// the configured slots except 光环, which never joins a grade or a set group.
+type avatarBandCandidates struct {
 	bySlot map[int][]shared.EquipmentCatalogItem
 	groups map[string]*setGroup
 }
@@ -337,46 +363,75 @@ type avatarJobCandidates struct {
 const maxAvatarJob = 15
 
 func PrepareAvatarCatalog(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig) *AvatarCandidateCatalog {
-	slots := normalizedAvatarSlots(rc.AvatarSlots)
+	slots := AvatarSlotsInUse(rc.AvatarSlots)
 	slotByType := make(map[int]int, len(slots))
+	auraWanted := false
 	for _, slot := range slots {
+		if slot == AvatarAuraSlot {
+			auraWanted = true
+			continue
+		}
 		slotByType[slot+20] = slot
 	}
 	catalog := &AvatarCandidateCatalog{items: items, slots: slots, jobs: make(map[int]*avatarJobCandidates, maxAvatarJob+1)}
 	for job := 0; job <= maxAvatarJob; job++ {
-		bySlot := make(map[int][]shared.EquipmentCatalogItem, len(slots))
-		for _, slot := range slots {
-			bySlot[slot] = nil
+		bands := make(map[int]*avatarBandCandidates, 2)
+		for _, rarity := range []int{CommonAvatarRarity, RareAvatarRarity} {
+			bySlot := make(map[int][]shared.EquipmentCatalogItem, len(slots))
+			for _, slot := range slots {
+				if slot != AvatarAuraSlot {
+					bySlot[slot] = nil
+				}
+			}
+			bands[rarity] = &avatarBandCandidates{bySlot: bySlot}
 		}
-		catalog.jobs[job] = &avatarJobCandidates{bySlot: bySlot}
+		catalog.jobs[job] = &avatarJobCandidates{bands: bands}
 	}
 	for _, item := range items {
-		slot, wanted := slotByType[item.ItemType]
-		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
+		if item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
 			continue
 		}
-		for job := 0; job <= maxAvatarJob; job++ {
-			if AvatarUsableByJob(item, job) {
-				candidates := catalog.jobs[job]
-				candidates.bySlot[slot] = append(candidates.bySlot[slot], item)
+		if item.ItemType-20 == AvatarAuraSlot {
+			if !auraWanted {
+				continue
 			}
+			for job := 0; job <= maxAvatarJob; job++ {
+				if AvatarUsableByJob(item, job) {
+					catalog.jobs[job].aura = append(catalog.jobs[job].aura, item)
+				}
+			}
+			continue
+		}
+		slot, wanted := slotByType[item.ItemType]
+		if !wanted {
+			continue
+		}
+		rarityBand := AvatarRarityBand(item.Rarity)
+		for job := 0; job <= maxAvatarJob; job++ {
+			if !AvatarUsableByJob(item, job) {
+				continue
+			}
+			bySlot := catalog.jobs[job].bands[rarityBand].bySlot
+			bySlot[slot] = append(bySlot[slot], item)
 		}
 	}
 	for _, candidates := range catalog.jobs {
-		candidates.groups = buildSetGroups(candidates.bySlot)
+		for _, band := range candidates.bands {
+			band.groups = buildSetGroups(band.bySlot)
+		}
 	}
 	return catalog
 }
 
-func (c *AvatarCandidateCatalog) Select(job int, rc robotconfig.RuntimeConfig, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+func (c *AvatarCandidateCatalog) Select(level, job int, rc robotconfig.RuntimeConfig, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
 	if c == nil {
 		return map[int]shared.EquipmentCatalogItem{}
 	}
-	if !sameIntValues(c.slots, normalizedAvatarSlots(rc.AvatarSlots)) {
+	if !sameIntValues(c.slots, AvatarSlotsInUse(rc.AvatarSlots)) {
 		// The caller changed the avatar slot configuration after preparation.
 		// Rebuild instead of returning a selection from stale candidates. The
 		// rebuild carries the current slots, so the retry settles.
-		return PrepareAvatarCatalog(c.items, rc).Select(job, rc, randIntn)
+		return PrepareAvatarCatalog(c.items, rc).Select(level, job, rc, randIntn)
 	}
 	candidates, ok := c.jobs[job]
 	if !ok {
@@ -386,25 +441,25 @@ func (c *AvatarCandidateCatalog) Select(job int, rc robotconfig.RuntimeConfig, r
 		// job instead of leaving it without avatars.
 		return map[int]shared.EquipmentCatalogItem{}
 	}
+	if level < AvatarMinLevel {
+		// Under the floor the client would refuse the 高级时装 this path hands
+		// out, and the operator chose to grant nothing over splitting the low
+		// levels further.
+		return map[int]shared.EquipmentCatalogItem{}
+	}
 	selected := make(map[int]shared.EquipmentCatalogItem)
-	if rc.PreferAvatarSets {
-		selected = selectAvatarSetItemsFromGroups(candidates.groups, rc.AvatarSetMinSlots, randIntn)
-	}
-	FillRandomItems(selected, candidates.bySlot, randIntn)
-	return selected
-}
-
-func normalizedAvatarSlots(slots []int) []int {
-	if len(slots) == 0 {
-		return []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-	}
-	out := make([]int, 0, len(slots))
-	for _, slot := range slots {
-		if slot >= 0 && slot <= 9 {
-			out = append(out, slot)
+	if band, ok := candidates.bands[AvatarRarityFor(level)]; ok {
+		if rc.PreferAvatarSets {
+			selected = selectAvatarSetItemsFromGroups(band.groups, AvatarSetMinSlotsFor(level, rc.AvatarSetMinSlots), randIntn)
 		}
+		FillRandomItems(selected, band.bySlot, randIntn)
 	}
-	return out
+	// 光环 is drawn last and on its own, from every grade the archive carries for
+	// it. It is not part of the 时装 set, so the level band must not narrow it.
+	if len(candidates.aura) > 0 {
+		selected[AvatarAuraSlot] = candidates.aura[safeRandIntn(randIntn, len(candidates.aura))]
+	}
+	return selected
 }
 
 func sameIntValues(left, right []int) bool {
@@ -524,6 +579,10 @@ func BuildEquipmentSlots(items []shared.EquipmentCatalogItem, level int, job, gr
 	selected := SelectEquipment(items, level, job, grow, rc, randIntn)
 	raw := make([]byte, 12*61)
 	for slot, item := range selected {
+		if slot < 1 || slot > 12 {
+			// The earring has no place in the legacy 12-slot blob.
+			continue
+		}
 		write := func(rng *rand.Rand) {
 			WriteEquipSlot(raw[(slot-1)*61:slot*61], item, rng, SlotOptions{
 				IntensifyMin: rc.EquipIntensifyMin,
@@ -607,13 +666,21 @@ func equipmentCandidate(item shared.EquipmentCatalogItem, slot, level, job, grow
 		// No pin: slot 2 behaves like any other, so an operator who lists it in
 		// equip_slots keeps the random draw and its band.
 	}
-	if item.Level > level || !UsableByJob(item.UseJob, job) {
+	if item.Level > EquipLevelFor(level) || !UsableByJob(item.UseJob, job) {
+		return false
+	}
+	if slot == EarringItemType && level < EarringMinLevel {
 		return false
 	}
 	if !armorAllowed(item, ArmorMaterialsFor(job, grow)) {
 		return false
 	}
-	return rc.EquipRarityMax <= 0 || item.Rarity >= rc.EquipRarityMin && item.Rarity <= rc.EquipRarityMax
+	if !weaponAllowed(item, job, grow) {
+		return false
+	}
+	// Same band rule as equipmentCandidates, so an existing loadout is only
+	// kept when a fresh selection could have produced it.
+	return item.Rarity == BandRarityFor(level)
 }
 
 type setGroup struct {

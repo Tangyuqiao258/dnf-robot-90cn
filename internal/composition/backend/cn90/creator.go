@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	capabilitypvf "robot/internal/capability/pvf"
 	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
 	robotlifecycle "robot/internal/capability/robotlifecycle"
@@ -29,6 +30,10 @@ type RobotCreator struct {
 	Names         robottemplate.NameTemplates
 	Maps          []shared.MapCatalogItem
 	JobGrows      map[int][]int
+	// StatTables is the archive's per-job [growtype]/[awakening] graph. The plan
+	// reads it to decide whether a chosen awakening is one the server can
+	// compute, which is the only way a 外传 character awakens at all.
+	StatTables    map[int]capabilitypvf.CharacterStatTables
 	AccountPrefix string
 	PasswordHash  string
 	IDStart       int
@@ -82,8 +87,8 @@ func (c RobotCreator) CreateRobots(ctx context.Context, request robotcap.CreateR
 		plans, err := robotlifecycle.BuildProtocolRobotPlans(robotlifecycle.ProtocolPlanOptions{
 			Count: 1, IDStart: uid, AccountPrefix: c.AccountPrefix,
 			PasswordHash: c.PasswordHash, Config: c.Config, Names: c.Names, Maps: c.Maps, JobGrows: c.JobGrows, Locations: planLocations,
-			CrowdPolicy: c.CrowdPolicy,
-			RandIntn:    c.RandIntn, RandBetween: c.RandBetween,
+			CrowdPolicy: c.CrowdPolicy, AwakeningRows: awakeningRows(c.StatTables),
+			RandIntn: c.RandIntn, RandBetween: c.RandBetween,
 			NameExists: nameTaken,
 		})
 		if err != nil {

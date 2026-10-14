@@ -15,24 +15,24 @@ import (
 func TestBestEquipmentLevelsMirrorsSelectionFilters(t *testing.T) {
 	rc := robotconfig.Default()
 	rc.EquipSlots = []int{1, 2}
-	rc.EquipRarityMin, rc.EquipRarityMax = 0, 5
+	// Level 60 sits in the 36..70 band, whose gear is 神器 (rarity 3).
 	items := []shared.EquipmentCatalogItem{
-		{ID: 1, ItemType: 1, Level: 30, UseJob: []int{1}},
-		{ID: 2, ItemType: 1, Level: 70, UseJob: []int{1}},
-		{ID: 3, ItemType: 1, Level: 60, UseJob: []int{2}},
-		{ID: 4, ItemType: 1, Level: 55, UseJob: []int{100}, ClientIncompatible: true},
-		{ID: 5, ItemType: 1, Level: 58, UseJob: []int{1}, Expire: true},
-		{ID: 6, ItemType: 2, Level: 40, UseJob: []int{1}},
+		{ID: 1, ItemType: 1, Level: 30, Rarity: 3, UseJob: []int{1}},
+		{ID: 2, ItemType: 1, Level: 70, Rarity: 3, UseJob: []int{1}},
+		{ID: 3, ItemType: 1, Level: 60, Rarity: 3, UseJob: []int{2}},
+		{ID: 4, ItemType: 1, Level: 55, Rarity: 3, UseJob: []int{100}, ClientIncompatible: true},
+		{ID: 5, ItemType: 1, Level: 58, Rarity: 3, UseJob: []int{1}, Expire: true},
+		{ID: 6, ItemType: 2, Level: 40, Rarity: 3, UseJob: []int{1}},
 	}
 	best := BestEquipmentLevels(items, 60, 1, 0, rc)
 	if best[1] != 30 || best[2] != 40 {
 		t.Fatalf("best levels=%v", best)
 	}
-	// The rarity window excludes the only job-compatible weapon.
-	rc.EquipRarityMin, rc.EquipRarityMax = 3, 5
-	best = BestEquipmentLevels(items, 60, 1, 0, rc)
-	if best[1] != 0 {
-		t.Fatalf("filtered weapon best level=%d", best[1])
+	// Level 30 sits in the ≤35 band, whose gear is 紫 (rarity 2), so none of the
+	// 神器 the catalog holds is gear this character is owed.
+	best = BestEquipmentLevels(items, 30, 1, 0, rc)
+	if best[1] != 0 || best[2] != 0 {
+		t.Fatalf("out-of-band best levels=%v", best)
 	}
 }
 
@@ -201,14 +201,16 @@ func TestEquipmentSetSelectionKeepsHighestScore(t *testing.T) {
 }
 
 func TestSelectEquipmentScansCatalogAcrossConfiguredSlots(t *testing.T) {
+	// Level 100 is past the last band's gate, so this character is owed 史诗
+	// (rarity 4) gear.
 	items := []shared.EquipmentCatalogItem{
-		{ID: 100, ItemType: 1, Level: 100, UseJob: []int{1}, ClientIncompatible: true},
-		{ID: 101, ItemType: 1, Level: 50, UseJob: []int{1}},
-		{ID: 102, ItemType: 1, Level: 90, UseJob: []int{1}},
-		{ID: 103, ItemType: 1, Level: 100, UseJob: []int{1}},
-		{ID: 104, ItemType: 1, Level: 100, UseJob: []int{2}},
-		{ID: 201, ItemType: 2, Level: 80, UseJob: []int{100}},
-		{ID: 301, ItemType: 3, Level: 80, UseJob: []int{1}},
+		{ID: 100, ItemType: 1, Level: 100, Rarity: 4, UseJob: []int{1}, ClientIncompatible: true},
+		{ID: 101, ItemType: 1, Level: 50, Rarity: 4, UseJob: []int{1}},
+		{ID: 102, ItemType: 1, Level: 90, Rarity: 4, UseJob: []int{1}},
+		{ID: 103, ItemType: 1, Level: 100, Rarity: 4, UseJob: []int{1}},
+		{ID: 104, ItemType: 1, Level: 100, Rarity: 4, UseJob: []int{2}},
+		{ID: 201, ItemType: 2, Level: 80, Rarity: 4, UseJob: []int{100}},
+		{ID: 301, ItemType: 3, Level: 80, Rarity: 4, UseJob: []int{1}},
 	}
 
 	selected := SelectEquipment(items, 100, 1, 0, robotconfig.RuntimeConfig{EquipSlots: []int{1, 2}}, func(int) int { return 0 })
@@ -227,7 +229,9 @@ func TestSelectAvatarScansCatalogAcrossConfiguredSlots(t *testing.T) {
 		{ID: 900, ItemType: 29, Name: "aura"},
 	}
 
-	selected := SelectAvatar(items, 1, robotconfig.RuntimeConfig{AvatarSlots: []int{0, 1, 9}}, func(int) int { return 0 })
+	// Below RareAvatarMinLevel, so the whole fixture is in the one 时装 grade the
+	// fixtures declare — rarity 0 — and the test is about slot coverage.
+	selected := SelectAvatar(items, 50, 1, robotconfig.RuntimeConfig{AvatarSlots: []int{0, 1, 9}}, func(int) int { return 0 })
 
 	if len(selected) != 2 || selected[0].ID != 100 || selected[9].ID != 900 {
 		t.Fatalf("selected avatar = %+v", selected)
@@ -247,14 +251,14 @@ func TestSelectAvatarSettlesForJobsOutsideTheCatalog(t *testing.T) {
 		{ID: 200, ItemType: 20, Name: "hat", Path: "equipment/character/gunner/avatar/cap/200.equ", UseJob: []int{2}},
 	}
 	rc := robotconfig.RuntimeConfig{AvatarSlots: []int{0}, MinAvatarSlots: 0}
-	if selected := SelectAvatar(items, 12, rc, func(int) int { return 0 }); len(selected) != 1 || selected[0].ID != 100 {
+	if selected := SelectAvatar(items, 50, 12, rc, func(int) int { return 0 }); len(selected) != 1 || selected[0].ID != 100 {
 		t.Fatalf("job 12 selected %+v, want its own avatar", selected)
 	}
-	if selected := SelectAvatar(items, 2, rc, func(int) int { return 0 }); len(selected) != 1 || selected[0].ID != 200 {
+	if selected := SelectAvatar(items, 50, 2, rc, func(int) int { return 0 }); len(selected) != 1 || selected[0].ID != 200 {
 		t.Fatalf("job 2 selected %+v, want its own avatar", selected)
 	}
 	// Above the PVF's job count: no avatars, and no unbounded retry either.
-	if selected := SelectAvatar(items, maxAvatarJob+1, rc, func(int) int { return 0 }); len(selected) != 0 {
+	if selected := SelectAvatar(items, 50, maxAvatarJob+1, rc, func(int) int { return 0 }); len(selected) != 0 {
 		t.Fatalf("job %d selected %+v, want none", maxAvatarJob+1, selected)
 	}
 }
@@ -328,7 +332,7 @@ func TestSelectAvatarFiltersPVFErrorStringItemsOnly(t *testing.T) {
 		{ID: 300, ItemType: 24, Name: "beach pants", Path: "avatar/pants/beach.equ", UseJob: []int{7}},
 	}
 
-	selected := SelectAvatar(items, 7, robotconfig.RuntimeConfig{AvatarSlots: []int{0, 3, 4}}, func(int) int { return 0 })
+	selected := SelectAvatar(items, 50, 7, robotconfig.RuntimeConfig{AvatarSlots: []int{0, 3, 4}}, func(int) int { return 0 })
 
 	if len(selected) != 3 || selected[0].ID != 101 || selected[3].ID != 200 || selected[4].ID != 300 {
 		t.Fatalf("selected safe avatar = %+v", selected)
@@ -385,9 +389,10 @@ func TestFilterAvatarSupportedJobsDoesNotCountClientIncompatibleSlots(t *testing
 }
 
 func TestFilterEquipmentSupportedJobsUsesGeneratedLevel(t *testing.T) {
+	// Both levels sit in the 36..70 band, so both items carry 神器 (rarity 3).
 	items := []shared.EquipmentCatalogItem{
-		{ID: 100, ItemType: 1, Level: 50, UseJob: []int{1}},
-		{ID: 200, ItemType: 1, Level: 60, UseJob: []int{2}},
+		{ID: 100, ItemType: 1, Level: 50, Rarity: 3, UseJob: []int{1}},
+		{ID: 200, ItemType: 1, Level: 60, Rarity: 3, UseJob: []int{2}},
 	}
 	rc := robotconfig.RuntimeConfig{EquipSlots: []int{1}, EquipRarityMax: 5}
 	if got := FilterEquipmentSupportedJobs([]int{1, 2, 3}, items, 50, rc); len(got) != 1 || got[0] != 1 {

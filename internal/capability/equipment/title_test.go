@@ -16,10 +16,13 @@ const (
 
 func titleTestItems() []shared.EquipmentCatalogItem {
 	return []shared.EquipmentCatalogItem{
+		// One coat per band a test uses: the level bands hand a level-50 character
+		// 神器 and a level-90 one 史诗, so no single coat is valid at both.
 		{ID: 1, ItemType: 3, Level: 50, Rarity: 3, Durability: 20, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/coat_a.equ"},
+		{ID: 2, ItemType: 3, Level: 90, Rarity: 4, Durability: 20, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/coat_b.equ"},
 		{ID: testTitleGuardian, ItemType: 2, Level: 1, Rarity: 2, Durability: 20, UseJob: []int{100}, Path: "equipment/character/common/title/chn_400330105.equ"},
-		// Rarity 6 sits above the fleet's band, which tops out at 5: the pin has
-		// to survive a band that would have drawn nothing.
+		// Rarity 6 sits above every band the fleet uses: the pin has to survive a
+		// band that would have drawn nothing.
 		{ID: testTitleChosen, ItemType: 2, Level: 1, Rarity: 6, Durability: 20, UseJob: []int{100}, Path: "equipment/character/common/title/chn_400330106.equ"},
 	}
 }
@@ -27,7 +30,6 @@ func titleTestItems() []shared.EquipmentCatalogItem {
 func titleTestConfig() robotconfig.RuntimeConfig {
 	rc := robotconfig.Default()
 	rc.EquipSlots = []int{3}
-	rc.EquipRarityMin, rc.EquipRarityMax = 0, 5
 	rc.PreferEquipSets = false
 	rc.TitleEnabled = true
 	return rc
@@ -123,6 +125,8 @@ func TestEquipmentSlotsNeedRepairWantsThePinnedTitle(t *testing.T) {
 		t.Fatal("the top title was accepted on a robot below the level gate")
 	}
 	write(title, testTitleChosen)
+	// Level 90 is owed 史诗 gear, so the coat has to change with the level too.
+	write(coat, 2)
 	if EquipmentSlotsNeedRepair(raw, itemsByID, 90, 0, 0, rc) {
 		t.Fatal("a level-90 robot wearing the top title was marked for repair")
 	}
@@ -130,6 +134,7 @@ func TestEquipmentSlotsNeedRepairWantsThePinnedTitle(t *testing.T) {
 	// left where it is rather than stripped on every pass.
 	rc.TitleEnabled = false
 	write(title, testTitleChosen)
+	write(coat, 1)
 	if EquipmentSlotsNeedRepair(raw, itemsByID, 50, 0, 0, rc) {
 		t.Fatal("titles off still repaired the title slot")
 	}

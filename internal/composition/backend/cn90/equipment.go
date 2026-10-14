@@ -39,7 +39,10 @@ const (
 	//
 	//	1 — first generated loadouts
 	//	2 — armor follows the transfer branch's mastered material
-	cn90LoadoutVersion = 2
+	//	3 — one set per equipment family, gear level on the 5s, rarity and
+	//	    upgrade from the level band, 增幅 from level 71, 耳环 at level 90
+	//	4 — 时装 follows the level band, 稀有装扮 from level 71, 皮肤 never
+	cn90LoadoutVersion = 4
 )
 
 // cn90WornSlotForItemType maps the capability/pvf equipment type to the DNF90
@@ -60,11 +63,16 @@ var cn90WornSlotForItemType = map[int]int{
 }
 
 // selectWornEquipment picks one item per configured worn slot for the level,
-// job and transfer branch. The generic selector covers item types 1..12;
-// earrings (13) are picked with the same level/rarity/job rules.
+// job and transfer branch, and maps the capability equipment types onto the
+// server's worn slots.
+//
+// The earring is not a special case here. 耳环 is the last member of the
+// special-equipment family, so the generic selector offers it at level 90 like
+// any other slot — which is also what lets it join the family's set instead of
+// being drawn on its own.
 func selectWornEquipment(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig, level, job, grow int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
 	selected := equipmentcap.SelectEquipment(items, level, job, grow, rc, randIntn)
-	worn := make(map[int]shared.EquipmentCatalogItem, len(selected)+1)
+	worn := make(map[int]shared.EquipmentCatalogItem, len(selected))
 	for itemType, item := range selected {
 		slot, ok := cn90WornSlotForItemType[itemType]
 		if !ok || item.ID <= 0 {
@@ -72,55 +80,7 @@ func selectWornEquipment(items []shared.EquipmentCatalogItem, rc robotconfig.Run
 		}
 		worn[slot] = item
 	}
-	if equipmentTypeConfigured(rc.EquipSlots, 13) {
-		if item, ok := selectEarring(items, rc, level, job, randIntn); ok {
-			worn[23] = item
-		}
-	}
 	return worn
-}
-
-func equipmentTypeConfigured(slots []int, wanted int) bool {
-	if len(slots) == 0 {
-		return true
-	}
-	for _, slot := range slots {
-		if slot == wanted {
-			return true
-		}
-	}
-	return false
-}
-
-func selectEarring(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig, level, job int, randIntn func(int) int) (shared.EquipmentCatalogItem, bool) {
-	best := -1
-	candidates := make([]shared.EquipmentCatalogItem, 0, 8)
-	for _, item := range items {
-		if item.ItemType != 13 || item.ID <= 0 || item.Expire || item.BadName || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
-			continue
-		}
-		if item.Level > level || !equipmentcap.UsableByJob(item.UseJob, job) {
-			continue
-		}
-		if rc.EquipRarityMax > 0 && (item.Rarity < rc.EquipRarityMin || item.Rarity > rc.EquipRarityMax) {
-			continue
-		}
-		if item.Level > best {
-			best = item.Level
-			candidates = candidates[:0]
-		}
-		if item.Level == best {
-			candidates = append(candidates, item)
-		}
-	}
-	if len(candidates) == 0 {
-		return shared.EquipmentCatalogItem{}, false
-	}
-	index := 0
-	if randIntn != nil && len(candidates) > 1 {
-		index = randIntn(len(candidates))
-	}
-	return candidates[index], true
 }
 
 // cn90AvatarJob maps the robot job id onto the avatar catalog's job axis.
@@ -233,7 +193,7 @@ func (a *SQLiteLoadoutApplier) applyRobotLoadout(ctx context.Context, db *sql.DB
 		randIntn = cryptoRandIntn
 	}
 	worn := selectWornEquipment(a.Equipment, a.Config, level, job, grow, randIntn)
-	avatars := equipmentcap.SelectAvatar(a.Equipment, cn90AvatarJob(job), a.Config, randIntn)
+	avatars := equipmentcap.SelectAvatar(a.Equipment, level, cn90AvatarJob(job), a.Config, randIntn)
 	if len(worn) == 0 && len(avatars) == 0 {
 		return fmt.Errorf("90CN loadout has no compatible items for level=%d job=%d", level, job)
 	}
@@ -242,7 +202,7 @@ func (a *SQLiteLoadoutApplier) applyRobotLoadout(ctx context.Context, db *sql.DB
 		return err
 	}
 	defer tx.Rollback()
-	if err := a.replaceEquipmentRows(ctx, tx, characterID, worn, avatars, randIntn); err != nil {
+	if err := a.replaceEquipmentRows(ctx, tx, characterID, worn, avatars, level, job, grow, randIntn); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -254,7 +214,13 @@ func (a *SQLiteLoadoutApplier) applyRobotLoadout(ctx context.Context, db *sql.DB
 // replaceEquipmentRows replaces the complete worn set: equipment, avatars and
 // their extras. Parents are upserted first, matching the server repository
 // write shape.
-func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql.Tx, characterID string, worn, avatars map[int]shared.EquipmentCatalogItem, randIntn func(int) int) error {
+//
+// Every worn item is stamped with its level band's upgrade range, and from the
+// band that carries 增幅 (level 71) it is also given the robot's amplification
+// attribute and that attribute's initial value. Avatars are never upgraded or
+// amplified: they are cosmetic, and the client draws an amplify marker on any
+// slot that carries the extras.
+func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql.Tx, characterID string, worn, avatars map[int]shared.EquipmentCatalogItem, level, job, grow int, randIntn func(int) int) error {
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO `+dnfEquipmentsTable+` (character_id, updated_at) VALUES (?, ?) ON CONFLICT(character_id) DO UPDATE SET updated_at=excluded.updated_at`,
@@ -288,6 +254,11 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 		return nil
 	}
 
+	band := equipmentcap.EquipmentBandFor(level)
+	amplifyAttribute := 0
+	if band.Amplified {
+		amplifyAttribute = equipmentcap.AmplifyAttributeFor(job, grow)
+	}
 	for slot, item := range worn {
 		if item.ID <= 0 {
 			continue
@@ -299,22 +270,7 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 		if durability > 0xffff {
 			durability = 0xffff
 		}
-		reinforce := byte(0)
-		if a.Config.EquipIntensifyMax > 0 && slot == 11 {
-			min := a.Config.EquipIntensifyMin
-			max := a.Config.EquipIntensifyMax
-			if min < 0 {
-				min = 0
-			}
-			if max > 31 {
-				max = 31
-			}
-			if max > min {
-				reinforce = byte(min + randIntn(max-min+1))
-			} else {
-				reinforce = byte(min)
-			}
-		}
+		reinforce := rollBandUpgrade(band, randIntn)
 		if err := insertEntry(slot, item.ID, buildCN90WornRawEntry(slot, item.ID, uint16(durability))); err != nil {
 			return err
 		}
@@ -343,6 +299,14 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 				return err
 			}
 		}
+		if value := a.Amplify.InitialValue(amplifyAttribute, band.Rarity); value > 0 {
+			if err := insertExtra(slot, "amplify_type", strconv.Itoa(amplifyAttribute)); err != nil {
+				return err
+			}
+			if err := insertExtra(slot, "amplify_value", strconv.Itoa(value)); err != nil {
+				return err
+			}
+		}
 	}
 
 	for slot, item := range avatars {
@@ -368,6 +332,42 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 		}
 	}
 	return nil
+}
+
+// maxUpgradeLevel is the ceiling the client's packed upgrade byte can hold: the
+// level sits in its low five bits (see the server's setUpgradeLevel).
+const maxUpgradeLevel = 31
+
+// rollBandUpgrade draws one item's upgrade level from its level band. The band
+// states a range rather than a value so a fleet does not read as identical, and
+// the range is what the operator asked for: each band carries its own 强化 or
+// 增幅 window.
+func rollBandUpgrade(band equipmentcap.EquipmentBand, randIntn func(int) int) byte {
+	min := band.UpgradeMin
+	max := band.UpgradeMax
+	if min < 0 {
+		min = 0
+	}
+	if max > maxUpgradeLevel {
+		max = maxUpgradeLevel
+	}
+	if max <= min {
+		return byte(clampUpgrade(min))
+	}
+	if randIntn == nil {
+		return byte(clampUpgrade(min))
+	}
+	return byte(clampUpgrade(min + randIntn(max-min+1)))
+}
+
+func clampUpgrade(level int) int {
+	if level < 0 {
+		return 0
+	}
+	if level > maxUpgradeLevel {
+		return maxUpgradeLevel
+	}
+	return level
 }
 
 // cryptoRandIntn is the fallback source when the scheduler did not provide one.

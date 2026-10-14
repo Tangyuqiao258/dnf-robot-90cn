@@ -154,10 +154,17 @@ func ComposeRuntime(ctx context.Context, opts RuntimeComposeOptions) (RuntimeBun
 		return bundle, fmt.Errorf("startup identities: %w", err)
 	}
 	logStartupStage("state_identities")
-	questGates := mergeTownNeedQuests(catalogs.QuestGates, catalogs.TownMaps)
+	questGates := mergeEquipmentSlotUnlockQuests(mergeTownNeedQuests(catalogs.QuestGates, catalogs.TownMaps))
 	seeded, err := SeedRobotQuestGates(ctx, databasePath, inventory.Robots, questGates)
 	if err != nil {
 		return bundle, fmt.Errorf("quest gates: %w", err)
+	}
+	slots, err := GrantEquipmentSlotUnlocks(ctx, databasePath, inventory.Robots)
+	if err != nil {
+		return bundle, fmt.Errorf("equipment slot unlock: %w", err)
+	}
+	if slots > 0 {
+		foundationlog.Robotf("CN90_EQUIPMENT_SLOTS_UNLOCKED characters=%d\n", slots)
 	}
 	if seeded > 0 {
 		foundationlog.Robotf("CN90_QUEST_GATES_SEEDED completed=%d active=%d robots=%d\n",
@@ -171,6 +178,7 @@ func ComposeRuntime(ctx context.Context, opts RuntimeComposeOptions) (RuntimeBun
 	loadouts.LevelThresholds = catalogs.LevelThresholds
 	loadouts.QuestGates = questGates
 	loadouts.Stackables = catalogs.Stackable
+	loadouts.Amplify = catalogs.Amplify
 	replaced, err := loadouts.ReconcileRobotLoadouts(ctx, prefix, inventory.Robots)
 	if err != nil {
 		_ = loadouts.Close()
@@ -209,6 +217,7 @@ func ComposeRuntime(ctx context.Context, opts RuntimeComposeOptions) (RuntimeBun
 		Provisioner: Provisioner{ConnectHost: opts.ConnectIP, Channels: channels, Binder: binder},
 		BatchStore:  state, IdentityStore: state, RobotCatalog: state,
 		Config: opts.Config, Names: names, Maps: catalogs.TownMaps, JobGrows: catalogs.JobGrows,
+		StatTables:    catalogs.StatTables,
 		CrowdPolicy:   bundle.CrowdRules,
 		AccountPrefix: prefix, IDStart: opts.Config.RobotUIDStart,
 		RandIntn: opts.RandIntn, RandBetween: opts.RandBetween,

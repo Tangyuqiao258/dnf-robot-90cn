@@ -21,6 +21,10 @@ type Catalogs struct {
 	StatTables       map[int]capabilitypvf.CharacterStatTables
 	StatFallbackJobs []int
 	LevelThresholds  []int
+	// Amplify holds the archive's amplification tables, read so an amplified
+	// item's value is the number the game server would compute rather than a
+	// constant that drifts when the archive changes.
+	Amplify capabilitypvf.AmplifyConfig
 }
 
 func ReadCatalogs(pvfPath string) (Catalogs, error) {
@@ -44,6 +48,7 @@ func ReadCatalogs(pvfPath string) (Catalogs, error) {
 		StatTables:       statTables,
 		StatFallbackJobs: statFallbacks,
 		LevelThresholds:  capabilitypvf.ProjectLevelThresholds(archive),
+		Amplify:          capabilitypvf.ReadAmplifyConfig(archive),
 	}, nil
 }
 
