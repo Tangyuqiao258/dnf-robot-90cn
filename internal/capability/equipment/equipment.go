@@ -164,7 +164,7 @@ func FilterAvatarSupportedJobs(jobs []int, items []shared.EquipmentCatalogItem, 
 	}
 	eligible := make([]shared.EquipmentCatalogItem, 0)
 	for _, item := range items {
-		if item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
+		if item.ID == 0 || item.Expire || item.GrantBlocked || !AvatarRenderable(item) {
 			continue
 		}
 		if _, ok := wantedTypes[item.ItemType]; ok {
@@ -306,7 +306,7 @@ func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow i
 	poolBySlot := make(map[int]map[int][]shared.EquipmentCatalogItem, len(slots))
 	for _, item := range items {
 		slot, wanted := slotByItemType[item.ItemType]
-		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > gearLevel {
+		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || item.Level > gearLevel {
 			continue
 		}
 		if !UsableByJob(item.UseJob, job) {
@@ -415,7 +415,7 @@ func PrepareAvatarCatalog(items []shared.EquipmentCatalogItem, rc robotconfig.Ru
 		catalog.jobs[job] = &avatarJobCandidates{bands: bands}
 	}
 	for _, item := range items {
-		if item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
+		if item.ID == 0 || item.Expire || item.GrantBlocked || !AvatarRenderable(item) {
 			continue
 		}
 		if item.ItemType-20 == AvatarAuraSlot {
@@ -520,7 +520,7 @@ func SelectPet(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig
 		}
 	}
 	for _, item := range items {
-		if item.ID <= 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
+		if item.ID <= 0 || item.Expire || item.GrantBlocked {
 			continue
 		}
 		switch item.ItemType {
@@ -578,7 +578,7 @@ func SelectPet(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig
 // Those records have ErrorString names or stackable icons and are not
 // loadable by the game creature manager as equipped artifacts.
 func PetArtifactRenderable(item shared.EquipmentCatalogItem) bool {
-	if item.ID <= 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
+	if item.ID <= 0 || item.Expire || item.GrantBlocked {
 		return false
 	}
 	if item.ItemType < 31 || item.ItemType > 33 {
@@ -680,7 +680,7 @@ func configuredEquipmentSlot(slots []int, wanted int) bool {
 }
 
 func equipmentCandidate(item shared.EquipmentCatalogItem, slot, level, job, grow int, rc robotconfig.RuntimeConfig) bool {
-	if item.ID <= 0 || item.ItemType != slot || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
+	if item.ID <= 0 || item.ItemType != slot || item.Expire || item.GrantBlocked {
 		return false
 	}
 	if slot == titleSlot {

@@ -24,8 +24,12 @@ func TestBestEquipmentLevelsMirrorsSelectionFilters(t *testing.T) {
 		{ID: 5, ItemType: 1, Level: 58, Rarity: 3, UseJob: []int{1}, Expire: true},
 		{ID: 6, ItemType: 2, Level: 40, Rarity: 3, UseJob: []int{1}},
 	}
+	// Item 4 is deliberately ClientIncompatible and still counted: the flag marks
+	// the item-info script shape, not a selection bar, so level 55 is what this
+	// slot's band tops out at. Item 2 (past the gear level), item 3 (another job)
+	// and item 5 (expired) stay out, which is what mirroring the filters means.
 	best := BestEquipmentLevels(items, 60, 1, 0, rc)
-	if best[1] != 30 || best[2] != 40 {
+	if best[1] != 55 || best[2] != 40 {
 		t.Fatalf("best levels=%v", best)
 	}
 	// Level 30 sits in the ≤35 band, whose gear is 紫 (rarity 2), so none of the
@@ -247,16 +251,19 @@ func TestSelectEquipmentScansCatalogAcrossConfiguredSlots(t *testing.T) {
 		{ID: 301, ItemType: 3, Level: 80, Rarity: 4, UseJob: []int{1}},
 	}
 
+	// Item 100 is deliberately ClientIncompatible and still eligible, so the
+	// slot's top band holds both level-100 weapons and the deterministic first
+	// draw is the flagged record rather than the clean item 103.
 	selected := SelectEquipment(items, 100, 1, 0, robotconfig.RuntimeConfig{EquipSlots: []int{1, 2}}, func(int) int { return 0 })
 
-	if len(selected) != 2 || selected[1].ID != 102 || selected[2].ID != 201 {
+	if len(selected) != 2 || selected[1].ID != 100 || selected[2].ID != 201 {
 		t.Fatalf("selected equipment = %+v", selected)
 	}
 }
 
 func TestSelectAvatarScansCatalogAcrossConfiguredSlots(t *testing.T) {
 	items := []shared.EquipmentCatalogItem{
-		{ID: 99, ItemType: 20, Name: "unsafe hat", UseJob: []int{1}, ClientIncompatible: true},
+		{ID: 99, ItemType: 20, Name: "flagged hat", UseJob: []int{1}, ClientIncompatible: true},
 		{ID: 100, ItemType: 20, Name: "hat", UseJob: []int{1}},
 		{ID: 101, ItemType: 20, Name: "other hat", UseJob: []int{2}},
 		{ID: 200, ItemType: 21, Name: "hair", UseJob: []int{2}},
@@ -264,11 +271,37 @@ func TestSelectAvatarScansCatalogAcrossConfiguredSlots(t *testing.T) {
 	}
 
 	// Below RareAvatarMinLevel, so the whole fixture is in the one 时装 grade the
-	// fixtures declare — rarity 0 — and the test is about slot coverage.
+	// fixtures declare — rarity 0 — and the test is about slot coverage. Item 99
+	// is deliberately ClientIncompatible and still selectable, so the
+	// deterministic draw covers slot 0 with it; slot 1 stays empty because its
+	// only candidate belongs to another job; slot 9 draws the aura.
 	selected := SelectAvatar(items, 50, 1, robotconfig.RuntimeConfig{AvatarSlots: []int{0, 1, 9}}, func(int) int { return 0 })
 
-	if len(selected) != 2 || selected[0].ID != 100 || selected[9].ID != 900 {
+	if len(selected) != 2 || selected[0].ID != 99 || selected[9].ID != 900 {
 		t.Fatalf("selected avatar = %+v", selected)
+	}
+}
+
+// TestSelectorsKeepClientIncompatibleItemsEligible states directly what the
+// retired ClientIncompatible gate broke: the flag records an item-info script
+// shape, not a render failure, so a slot whose pool holds one flagged and one
+// clean item keeps both, and the draw may land on either.
+func TestSelectorsKeepClientIncompatibleItemsEligible(t *testing.T) {
+	items := []shared.EquipmentCatalogItem{
+		{ID: 300, ItemType: 1, Level: 50, Rarity: 3, UseJob: []int{1}, ClientIncompatible: true},
+		{ID: 301, ItemType: 1, Level: 50, Rarity: 3, UseJob: []int{1}},
+	}
+	// Level 50 sits in the 36..70 band, whose gear is 神器 (rarity 3).
+	rc := robotconfig.RuntimeConfig{EquipSlots: []int{1}}
+
+	if got := SelectEquipment(items, 50, 1, 0, rc, func(int) int { return 0 }); len(got) != 1 || got[1].ID != 300 {
+		t.Fatalf("flagged weapon = %+v, want it selectable like any other", got)
+	}
+	if got := SelectEquipment(items, 50, 1, 0, rc, func(n int) int { return n - 1 }); len(got) != 1 || got[1].ID != 301 {
+		t.Fatalf("clean weapon = %+v, want the second draw", got)
+	}
+	if best := BestEquipmentLevels(items, 50, 1, 0, rc); best[1] != 50 {
+		t.Fatalf("best levels=%v, want the flagged record counted", best)
 	}
 }
 
@@ -406,7 +439,12 @@ func TestFilterAvatarSupportedJobsKeepsConfiguredJobsWithoutAvatarCatalog(t *tes
 	}
 }
 
-func TestFilterAvatarSupportedJobsDoesNotCountClientIncompatibleSlots(t *testing.T) {
+// TestFilterAvatarSupportedJobsCountsClientIncompatibleSlots pins the retired
+// ClientIncompatible gate from the other side: the flag no longer withholds an
+// avatar from the slot coverage a job is credited with, so job 1's eighth slot
+// — a deliberately ClientIncompatible record — still counts and reaches the
+// configured 8-slot minimum.
+func TestFilterAvatarSupportedJobsCountsClientIncompatibleSlots(t *testing.T) {
 	items := make([]shared.EquipmentCatalogItem, 0, 16)
 	for slot := 0; slot < 8; slot++ {
 		items = append(items, shared.EquipmentCatalogItem{ID: 1000 + slot, ItemType: 20 + slot, Name: "safe job avatar", UseJob: []int{8}})
@@ -414,11 +452,11 @@ func TestFilterAvatarSupportedJobsDoesNotCountClientIncompatibleSlots(t *testing
 	for slot := 0; slot < 7; slot++ {
 		items = append(items, shared.EquipmentCatalogItem{ID: 2000 + slot, ItemType: 20 + slot, Name: "partial job avatar", UseJob: []int{1}})
 	}
-	items = append(items, shared.EquipmentCatalogItem{ID: 2007, ItemType: 27, Name: "unsafe job avatar", UseJob: []int{1}, ClientIncompatible: true})
+	items = append(items, shared.EquipmentCatalogItem{ID: 2007, ItemType: 27, Name: "flagged job avatar", UseJob: []int{1}, ClientIncompatible: true})
 
 	got := FilterAvatarSupportedJobs([]int{1, 8}, items, robotconfig.RuntimeConfig{MinAvatarSlots: 8})
-	if len(got) != 1 || got[0] != 8 {
-		t.Fatalf("supported jobs = %v, want [8]", got)
+	if len(got) != 2 || got[0] != 1 || got[1] != 8 {
+		t.Fatalf("supported jobs = %v, want [1 8]", got)
 	}
 }
 

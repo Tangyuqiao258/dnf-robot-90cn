@@ -69,8 +69,17 @@ type EquipmentCatalogItem struct {
 
 	RecipeTargetID int `json:"recipe_target_id,omitempty"`
 
-	// ClientIncompatible marks an item whose script uses fields that this DP2
-	// client cannot parse safely. Every generated-item consumer must reject it.
+	// ClientIncompatible marks an item whose script places an extended [add ...]
+	// property before [equipment type], the form the iteminfo/market path was
+	// once believed to reject. It is NOT a render gate: the client parses past
+	// those properties and draws the item normally. Character 1 in the live
+	// database wears [add attack speed]/[add cast speed]/[add move speed] ahead
+	// of [equipment type] on its amulet, wrist and ring -- with [icon] and
+	// [field image] behind them and the type line after -- and carries the
+	// remaining tags in its bag; a census of the archive finds the form on
+	// 49820 of 171645 .equ files, so gating worn gear on it emptied every
+	// level-90 set out of the fleet's pool. Only the market consumers
+	// (iteminfo, store assortment) still honour it. See ClientCompatibleEquipment.
 	ClientIncompatible bool `json:"client_incompatible,omitempty"`
 
 	// GrantBlocked marks an item that no robot may ever be granted, whatever
@@ -80,9 +89,12 @@ type EquipmentCatalogItem struct {
 	GrantBlocked bool `json:"grant_blocked,omitempty"`
 }
 
-// ClientCompatibleEquipment reports whether generated equipment may be sent
-// to this DP2 client. Keep compatibility policy separate from consumer-specific
-// eligibility rules so every equipment path honors the same PVF marker.
+// ClientCompatibleEquipment reports whether an item may enter the market
+// surfaces that build an iteminfo table for the client. It is deliberately not
+// consulted when the fleet dresses itself: the marker's stated cause does not
+// hold (see ClientIncompatible), and honouring it there left the fleet unable
+// to wear any complete level-90 set. Market consumers keep the guard until the
+// auction symptom that motivated it has its own reproduction.
 func ClientCompatibleEquipment(item EquipmentCatalogItem) bool {
 	return !item.ClientIncompatible
 }

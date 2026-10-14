@@ -39,7 +39,7 @@ func pinnedTitle(level int, rc robotconfig.RuntimeConfig, items []shared.Equipme
 		return shared.EquipmentCatalogItem{}, false
 	}
 	for _, item := range items {
-		if item.ID == id && item.ItemType == titleSlot && !item.Expire && !item.GrantBlocked && shared.ClientCompatibleEquipment(item) {
+		if item.ID == id && item.ItemType == titleSlot && !item.Expire && !item.GrantBlocked {
 			return item, true
 		}
 	}
