@@ -37,11 +37,11 @@ func (m *RobotManager) RepairRobotEquipment() (EquipmentRepairResult, error) {
 	result := EquipmentRepairResult{Scanned: len(records)}
 	var repairErr error
 	for _, record := range records {
-		if !equipcap.EquipmentSlotsNeedRepair(record.Raw, itemsByID, record.Info.Level, record.Info.Job, rc) {
+		if !equipcap.EquipmentSlotsNeedRepair(record.Raw, itemsByID, record.Info.Level, record.Info.Job, record.Info.Grow, rc) {
 			continue
 		}
-		raw := equipcap.BuildEquipmentSlots(items, record.Info.Level, record.Info.Job, rc, m.randIntn, m.withRand)
-		if equipcap.EquipmentSlotsNeedRepair(raw, itemsByID, record.Info.Level, record.Info.Job, rc) {
+		raw := equipcap.BuildEquipmentSlots(items, record.Info.Level, record.Info.Job, record.Info.Grow, rc, m.randIntn, m.withRand)
+		if equipcap.EquipmentSlotsNeedRepair(raw, itemsByID, record.Info.Level, record.Info.Job, record.Info.Grow, rc) {
 			repairErr = errors.Join(repairErr, fmt.Errorf("cannot build valid equipment for uid=%d cid=%d level=%d job=%d", record.Info.UID, record.Info.CID, record.Info.Level, record.Info.Job))
 			continue
 		}

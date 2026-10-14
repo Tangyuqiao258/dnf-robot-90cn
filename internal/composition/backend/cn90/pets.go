@@ -156,7 +156,7 @@ func (a *SQLiteLoadoutApplier) replacePetRows(ctx context.Context, tx *sql.Tx, c
 		"creature_serial_or_handle": petKey,
 		"creature_key":              petKey,
 		"creature_pvf_path":         pet.Path,
-		"robot_loadout":             "1",
+		cn90LoadoutMarkerKey:        strconv.Itoa(cn90LoadoutVersion),
 	}
 	if err := insertCN90Extras(ctx, tx, dnfPetEntryExtraTable,
 		`INSERT INTO `+dnfPetEntryExtraTable+` (character_id, entry_key, extra_key, extra_value) VALUES (?, ?, ?, ?)`,
@@ -181,11 +181,11 @@ func (a *SQLiteLoadoutApplier) replacePetRows(ctx context.Context, tx *sql.Tx, c
 			return fmt.Errorf("insert 90CN pet artifact character=%s kind=%s: %w", characterID, kind, err)
 		}
 		artifactExtras := map[string]string{
-			"item_kind":     "artifact",
-			"artifact_kind": kind,
-			"pvf_path":      item.Path,
-			"raw_entry_hex": hex.EncodeToString(raw),
-			"robot_loadout": "1",
+			"item_kind":          "artifact",
+			"artifact_kind":      kind,
+			"pvf_path":           item.Path,
+			"raw_entry_hex":      hex.EncodeToString(raw),
+			cn90LoadoutMarkerKey: strconv.Itoa(cn90LoadoutVersion),
 		}
 		if err := insertCN90Extras(ctx, tx, dnfPetArtifactExtraTable,
 			`INSERT INTO `+dnfPetArtifactExtraTable+` (character_id, entry_key, extra_key, extra_value) VALUES (?, ?, ?, ?)`,
@@ -216,7 +216,7 @@ func insertPetEquipmentEntry(ctx context.Context, tx *sql.Tx, characterID string
 		"value_a":                   "0",
 		"byte_12":                   "0",
 		"raw_entry_hex":             hex.EncodeToString(raw),
-		"robot_loadout":             "1",
+		cn90LoadoutMarkerKey:        strconv.Itoa(cn90LoadoutVersion),
 	}
 	return insertCN90Extras(ctx, tx, dnfEquipmentExtraTable,
 		`INSERT INTO `+dnfEquipmentExtraTable+` (character_id, entry_key, extra_key, extra_value) VALUES (?, ?, ?, ?)`,

@@ -211,7 +211,7 @@ func FilterEquipmentSupportedJobs(jobs []int, items []shared.EquipmentCatalogIte
 	out := make([]int, 0, len(jobs))
 	for _, job := range jobs {
 		for _, item := range items {
-			if equipmentCandidate(item, 1, level, job, rc) {
+			if equipmentCandidate(item, 1, level, job, 0, rc) {
 				out = append(out, job)
 				break
 			}
@@ -227,8 +227,8 @@ func SafeAvg(total, count int) int {
 	return total / count
 }
 
-func SelectEquipment(items []shared.EquipmentCatalogItem, level int, job int, rc robotconfig.RuntimeConfig, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
-	candidatesBySlot, bestLevelBySlot := equipmentCandidates(items, level, job, rc)
+func SelectEquipment(items []shared.EquipmentCatalogItem, level int, job, grow int, rc robotconfig.RuntimeConfig, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+	candidatesBySlot, bestLevelBySlot := equipmentCandidates(items, level, job, grow, rc)
 	for slot, candidates := range candidatesBySlot {
 		if len(candidates) == 0 {
 			delete(candidatesBySlot, slot)
@@ -260,18 +260,19 @@ func SelectEquipment(items []shared.EquipmentCatalogItem, level int, job int, rc
 // equipment slot for (level, job, config). The loadout compatibility check uses
 // the same candidate filters as SelectEquipment so an existing loadout is only
 // kept when a fresh selection could have produced it.
-func BestEquipmentLevels(items []shared.EquipmentCatalogItem, level, job int, rc robotconfig.RuntimeConfig) map[int]int {
-	_, bestLevelBySlot := equipmentCandidates(items, level, job, rc)
+func BestEquipmentLevels(items []shared.EquipmentCatalogItem, level, job, grow int, rc robotconfig.RuntimeConfig) map[int]int {
+	_, bestLevelBySlot := equipmentCandidates(items, level, job, grow, rc)
 	return bestLevelBySlot
 }
 
 // equipmentCandidates collects the selectable items per configured slot and
 // the highest selectable item level per slot.
-func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job int, rc robotconfig.RuntimeConfig) (map[int][]shared.EquipmentCatalogItem, map[int]int) {
+func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow int, rc robotconfig.RuntimeConfig) (map[int][]shared.EquipmentCatalogItem, map[int]int) {
 	slots := rc.EquipSlots
 	if len(slots) == 0 {
 		slots = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 	}
+	materials := ArmorMaterialsFor(job, grow)
 	candidatesBySlot := make(map[int][]shared.EquipmentCatalogItem, len(slots))
 	slotByItemType := make(map[int]int, len(slots))
 	bestLevelBySlot := make(map[int]int, len(slots))
@@ -292,6 +293,9 @@ func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job int, rc
 			continue
 		}
 		if !UsableByJob(item.UseJob, job) {
+			continue
+		}
+		if !armorAllowed(item, materials) {
 			continue
 		}
 		if item.Level > bestLevelBySlot[slot] {
@@ -321,14 +325,20 @@ type avatarJobCandidates struct {
 	groups map[string]*setGroup
 }
 
+// maxAvatarJob bounds the per-job avatar buckets. The game's character/character.lst
+// ends at job 15 and its creation path refuses anything outside it, so every job
+// the robot can create has a bucket; Select treats a job without one as having no
+// avatars. Keep this in step with the job ids the PVF releases.
+const maxAvatarJob = 15
+
 func PrepareAvatarCatalog(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig) *AvatarCandidateCatalog {
 	slots := normalizedAvatarSlots(rc.AvatarSlots)
 	slotByType := make(map[int]int, len(slots))
 	for _, slot := range slots {
 		slotByType[slot+20] = slot
 	}
-	catalog := &AvatarCandidateCatalog{items: items, slots: slots, jobs: make(map[int]*avatarJobCandidates, 9)}
-	for job := 0; job <= 8; job++ {
+	catalog := &AvatarCandidateCatalog{items: items, slots: slots, jobs: make(map[int]*avatarJobCandidates, maxAvatarJob+1)}
+	for job := 0; job <= maxAvatarJob; job++ {
 		bySlot := make(map[int][]shared.EquipmentCatalogItem, len(slots))
 		for _, slot := range slots {
 			bySlot[slot] = nil
@@ -340,7 +350,7 @@ func PrepareAvatarCatalog(items []shared.EquipmentCatalogItem, rc robotconfig.Ru
 		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
 			continue
 		}
-		for job := 0; job <= 8; job++ {
+		for job := 0; job <= maxAvatarJob; job++ {
 			if AvatarUsableByJob(item, job) {
 				candidates := catalog.jobs[job]
 				candidates.bySlot[slot] = append(candidates.bySlot[slot], item)
@@ -357,11 +367,19 @@ func (c *AvatarCandidateCatalog) Select(job int, rc robotconfig.RuntimeConfig, r
 	if c == nil {
 		return map[int]shared.EquipmentCatalogItem{}
 	}
-	candidates, ok := c.jobs[job]
-	if !ok || !sameIntValues(c.slots, normalizedAvatarSlots(rc.AvatarSlots)) {
+	if !sameIntValues(c.slots, normalizedAvatarSlots(rc.AvatarSlots)) {
 		// The caller changed the avatar slot configuration after preparation.
-		// Rebuild instead of returning a selection from stale candidates.
+		// Rebuild instead of returning a selection from stale candidates. The
+		// rebuild carries the current slots, so the retry settles.
 		return PrepareAvatarCatalog(c.items, rc).Select(job, rc, randIntn)
+	}
+	candidates, ok := c.jobs[job]
+	if !ok {
+		// A job outside maxAvatarJob has no avatars. Rebuilding cannot change
+		// that, so this must not retry: doing so recursed until the goroutine
+		// stack overflowed, killing the process on the first robot of such a
+		// job instead of leaving it without avatars.
+		return map[int]shared.EquipmentCatalogItem{}
 	}
 	selected := make(map[int]shared.EquipmentCatalogItem)
 	if rc.PreferAvatarSets {
@@ -497,8 +515,8 @@ func PetArtifactRenderable(item shared.EquipmentCatalogItem) bool {
 	return icon == "" || !strings.Contains(icon, "stackable")
 }
 
-func BuildEquipmentSlots(items []shared.EquipmentCatalogItem, level int, job int, rc robotconfig.RuntimeConfig, randIntn func(int) int, withRand func(func(*rand.Rand)) error) []byte {
-	selected := SelectEquipment(items, level, job, rc, randIntn)
+func BuildEquipmentSlots(items []shared.EquipmentCatalogItem, level int, job, grow int, rc robotconfig.RuntimeConfig, randIntn func(int) int, withRand func(func(*rand.Rand)) error) []byte {
+	selected := SelectEquipment(items, level, job, grow, rc, randIntn)
 	raw := make([]byte, 12*61)
 	for slot, item := range selected {
 		write := func(rng *rand.Rand) {
@@ -518,14 +536,14 @@ func BuildEquipmentSlots(items []shared.EquipmentCatalogItem, level int, job int
 	return raw
 }
 
-func EquipmentSlotsNeedRepair(raw []byte, itemsByID map[int]shared.EquipmentCatalogItem, level, job int, rc robotconfig.RuntimeConfig) bool {
+func EquipmentSlotsNeedRepair(raw []byte, itemsByID map[int]shared.EquipmentCatalogItem, level, job, grow int, rc robotconfig.RuntimeConfig) bool {
 	slots := rc.EquipSlots
 	if len(slots) == 0 {
 		slots = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 	}
 	required := make(map[int]bool, len(slots))
 	for _, item := range itemsByID {
-		if equipmentCandidate(item, item.ItemType, level, job, rc) && configuredEquipmentSlot(slots, item.ItemType) {
+		if equipmentCandidate(item, item.ItemType, level, job, grow, rc) && configuredEquipmentSlot(slots, item.ItemType) {
 			required[item.ItemType] = true
 		}
 	}
@@ -543,7 +561,7 @@ func EquipmentSlotsNeedRepair(raw []byte, itemsByID map[int]shared.EquipmentCata
 			continue
 		}
 		item, ok := itemsByID[itemID]
-		if !ok || !equipmentCandidate(item, slot, level, job, rc) {
+		if !ok || !equipmentCandidate(item, slot, level, job, grow, rc) {
 			return true
 		}
 		durability := int(binary.LittleEndian.Uint16(slotRaw[11:13]))
@@ -573,8 +591,11 @@ func configuredEquipmentSlot(slots []int, wanted int) bool {
 	return false
 }
 
-func equipmentCandidate(item shared.EquipmentCatalogItem, slot, level, job int, rc robotconfig.RuntimeConfig) bool {
+func equipmentCandidate(item shared.EquipmentCatalogItem, slot, level, job, grow int, rc robotconfig.RuntimeConfig) bool {
 	if item.ID <= 0 || item.ItemType != slot || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > level || !UsableByJob(item.UseJob, job) {
+		return false
+	}
+	if !armorAllowed(item, ArmorMaterialsFor(job, grow)) {
 		return false
 	}
 	return rc.EquipRarityMax <= 0 || item.Rarity >= rc.EquipRarityMin && item.Rarity <= rc.EquipRarityMax

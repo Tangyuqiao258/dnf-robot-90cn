@@ -166,8 +166,10 @@ func (a *SQLiteLoadoutApplier) ApplyCharacterLoadout(ctx context.Context, accoun
 }
 
 // ReconcileRobotLoadouts gives robots without any worn rows their generated
-// loadout. Robots that already wear equipment are left untouched so operator
-// edits survive restarts.
+// loadout. A robot already wearing a loadout written at the current marker
+// version is left untouched so operator edits survive restarts; one whose rows
+// carry an older version is rebuilt once, which is how a change to the
+// selection rules reaches the robots that are already running.
 func (a *SQLiteLoadoutApplier) ReconcileRobotLoadouts(ctx context.Context, accountPrefix string, robots []robotcap.Info) (int, error) {
 	if a == nil || len(robots) == 0 {
 		return 0, nil
@@ -205,11 +207,15 @@ func (a *SQLiteLoadoutApplier) ReconcileRobotLoadouts(ctx context.Context, accou
 
 // equipmentNeedsLoadout reports whether the account's active character still
 // wears only server starter rows (or nothing): generated rows carry the
-// robot_loadout marker, so any marked row means the loadout was already
-// applied and operator edits must survive. When pets are enabled the creature
-// state is checked the same way so a character created before the pet stage is
-// upgraded on the next startup, and a creature row written before the GBK name
-// encoding is re-applied so its name_raw stops overflowing the server limit.
+// robot_loadout marker, so any row marked at the current version means the
+// loadout was already applied and operator edits must survive. A row carrying
+// an older version counts as unmarked, which is how a change to the selection
+// rules reaches a fleet that already wears a loadout — once, on the startup
+// after the version moves. When pets are enabled the creature state is checked
+// by the marker alone (its value is never compared) so a character created
+// before the pet stage is upgraded on the next startup, and a creature row
+// written before the GBK name encoding is re-applied so its name_raw stops
+// overflowing the server limit.
 func (a *SQLiteLoadoutApplier) equipmentNeedsLoadout(ctx context.Context, account string) (bool, error) {
 	readCtx, cancel := context.WithTimeout(ctx, cn90PersistenceTimeout)
 	defer cancel()
@@ -224,8 +230,8 @@ func (a *SQLiteLoadoutApplier) equipmentNeedsLoadout(ctx context.Context, accoun
 	}
 	var marked int
 	if err := db.QueryRowContext(readCtx,
-		`SELECT COUNT(*) FROM `+dnfEquipmentExtraTable+` WHERE character_id=? AND extra_key='robot_loadout'`,
-		row.characterID).Scan(&marked); err != nil {
+		`SELECT COUNT(*) FROM `+dnfEquipmentExtraTable+` WHERE character_id=? AND extra_key=? AND CAST(extra_value AS INTEGER) >= ?`,
+		row.characterID, cn90LoadoutMarkerKey, cn90LoadoutVersion).Scan(&marked); err != nil {
 		return false, fmt.Errorf("count 90CN generated equipment character=%s: %w", row.characterID, err)
 	}
 	if marked == 0 {
@@ -239,8 +245,8 @@ func (a *SQLiteLoadoutApplier) equipmentNeedsLoadout(ctx context.Context, accoun
 	}
 	var petMarked int
 	if err := db.QueryRowContext(readCtx,
-		`SELECT COUNT(*) FROM `+dnfPetEntryExtraTable+` WHERE character_id=? AND extra_key='robot_loadout'`,
-		row.characterID).Scan(&petMarked); err != nil {
+		`SELECT COUNT(*) FROM `+dnfPetEntryExtraTable+` WHERE character_id=? AND extra_key=?`,
+		row.characterID, cn90LoadoutMarkerKey).Scan(&petMarked); err != nil {
 		return false, fmt.Errorf("count 90CN generated pet character=%s: %w", row.characterID, err)
 	}
 	if petMarked == 0 {
@@ -363,7 +369,7 @@ func (a *SQLiteLoadoutApplier) applyAccountLoadout(ctx context.Context, account 
 		if row.level < 1 {
 			row.level = 1
 		}
-		if err := a.applyRobotLoadout(jobCtx, db, row.characterID, row.job, row.level); err != nil {
+		if err := a.applyRobotLoadout(jobCtx, db, row.characterID, row.job, row.level, row.grow); err != nil {
 			return err
 		}
 		if err := a.applyRobotPet(jobCtx, db, row.characterID); err != nil {

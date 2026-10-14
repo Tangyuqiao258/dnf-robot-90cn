@@ -2,6 +2,7 @@ package cn90
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -54,6 +55,69 @@ func equipmentTestCatalog() []shared.EquipmentCatalogItem {
 		{ID: 202, Name: "脸", Path: "equipment/character/gunner/avatar/face/202.equ", ItemType: 22, Level: 1, Rarity: 1, UseJob: []int{2}},
 	}
 	return items
+}
+
+// TestReconcileRebuildsLoadoutWrittenBeforeTheCurrentVersion covers the fleet
+// re-roll: rows carrying an older marker version are rebuilt once, and only
+// once. Without the version a selection-rule change would never reach a robot
+// that already wears a loadout; without the second reconcile assertion the
+// version check could degenerate into wiping the fleet on every startup.
+func TestReconcileRebuildsLoadoutWrittenBeforeTheCurrentVersion(t *testing.T) {
+	path := newEquipmentTestDatabase(t)
+	config := robotconfig.Default()
+	config.EquipSlots = []int{1, 3}
+	config.AvatarSlots = []int{0}
+	config.MinAvatarSlots = 0
+	config.PetEnabled = false
+	config.EquipRarityMax = 5
+	applier, err := NewSQLiteLoadoutApplier(context.Background(), path, config, equipmentTestCatalog(), "", func(int) int { return 0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer applier.Close()
+
+	// A robot the previous loadout version equipped, wearing one item in slot 11.
+	db := openPurgeTestDatabase(t, path)
+	if _, err := db.Exec(fmt.Sprintf(`INSERT INTO dnf_equipments(character_id, updated_at) VALUES ('9','2026-01-01T00:00:00Z');
+INSERT INTO dnf_equipment_entries(character_id, entry_key, slot_index, item_id) VALUES ('9','11',11,101);
+INSERT INTO dnf_equipment_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','11','robot_loadout','%d');`, cn90LoadoutVersion-1)); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	robots := []robotcap.Info{{UID: 17000009, CID: 9, Name: "tester"}}
+	replaced, err := applier.ReconcileRobotLoadouts(context.Background(), "robot", robots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced != 1 {
+		t.Fatalf("reconciled robots = %d, want the one stale robot rebuilt", replaced)
+	}
+
+	db = openPurgeTestDatabase(t, path)
+	defer db.Close()
+	var stale, current int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM dnf_equipment_entry_extra WHERE character_id='9' AND extra_key='robot_loadout' AND CAST(extra_value AS INTEGER) < ?`, cn90LoadoutVersion).Scan(&stale); err != nil {
+		t.Fatal(err)
+	}
+	if stale != 0 {
+		t.Fatalf("rows still marked by an older version = %d", stale)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM dnf_equipment_entry_extra WHERE character_id='9' AND extra_key='robot_loadout' AND CAST(extra_value AS INTEGER) = ?`, cn90LoadoutVersion).Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	if current == 0 {
+		t.Fatal("rebuilt loadout carries no marker at the current version")
+	}
+
+	// The rebuild is a one-time pass: the next startup leaves the robot alone.
+	replaced, err = applier.ReconcileRobotLoadouts(context.Background(), "robot", robots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced != 0 {
+		t.Fatalf("second reconcile rebuilt %d robots, want the loadout left alone", replaced)
+	}
 }
 
 func TestRobotLoadoutWritesWornRows(t *testing.T) {

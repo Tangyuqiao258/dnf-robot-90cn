@@ -24,13 +24,13 @@ func TestBestEquipmentLevelsMirrorsSelectionFilters(t *testing.T) {
 		{ID: 5, ItemType: 1, Level: 58, UseJob: []int{1}, Expire: true},
 		{ID: 6, ItemType: 2, Level: 40, UseJob: []int{1}},
 	}
-	best := BestEquipmentLevels(items, 60, 1, rc)
+	best := BestEquipmentLevels(items, 60, 1, 0, rc)
 	if best[1] != 30 || best[2] != 40 {
 		t.Fatalf("best levels=%v", best)
 	}
 	// The rarity window excludes the only job-compatible weapon.
 	rc.EquipRarityMin, rc.EquipRarityMax = 3, 5
-	best = BestEquipmentLevels(items, 60, 1, rc)
+	best = BestEquipmentLevels(items, 60, 1, 0, rc)
 	if best[1] != 0 {
 		t.Fatalf("filtered weapon best level=%d", best[1])
 	}
@@ -144,19 +144,19 @@ func TestEquipmentSlotsNeedRepairValidatesConfiguredSlots(t *testing.T) {
 	raw := make([]byte, 12*61)
 	binary.LittleEndian.PutUint32(raw[2:6], 100)
 	binary.LittleEndian.PutUint16(raw[11:13], 20)
-	if EquipmentSlotsNeedRepair(raw, items, 50, 1, rc) {
+	if EquipmentSlotsNeedRepair(raw, items, 50, 1, 0, rc) {
 		t.Fatal("valid weapon was marked for repair")
 	}
 	binary.LittleEndian.PutUint16(raw[11:13], 21)
-	if !EquipmentSlotsNeedRepair(raw, items, 50, 1, rc) {
+	if !EquipmentSlotsNeedRepair(raw, items, 50, 1, 0, rc) {
 		t.Fatal("durability different from PVF value was accepted")
 	}
 	binary.LittleEndian.PutUint16(raw[11:13], 20)
-	if !EquipmentSlotsNeedRepair(raw, items, 50, 2, rc) {
+	if !EquipmentSlotsNeedRepair(raw, items, 50, 2, 0, rc) {
 		t.Fatal("wrong-job weapon was accepted")
 	}
 	binary.LittleEndian.PutUint32(raw[2:6], 0)
-	if !EquipmentSlotsNeedRepair(raw, items, 50, 1, rc) {
+	if !EquipmentSlotsNeedRepair(raw, items, 50, 1, 0, rc) {
 		t.Fatal("missing weapon was accepted")
 	}
 }
@@ -211,7 +211,7 @@ func TestSelectEquipmentScansCatalogAcrossConfiguredSlots(t *testing.T) {
 		{ID: 301, ItemType: 3, Level: 80, UseJob: []int{1}},
 	}
 
-	selected := SelectEquipment(items, 100, 1, robotconfig.RuntimeConfig{EquipSlots: []int{1, 2}}, func(int) int { return 0 })
+	selected := SelectEquipment(items, 100, 1, 0, robotconfig.RuntimeConfig{EquipSlots: []int{1, 2}}, func(int) int { return 0 })
 
 	if len(selected) != 2 || selected[1].ID != 102 || selected[2].ID != 201 {
 		t.Fatalf("selected equipment = %+v", selected)
@@ -231,6 +231,42 @@ func TestSelectAvatarScansCatalogAcrossConfiguredSlots(t *testing.T) {
 
 	if len(selected) != 2 || selected[0].ID != 100 || selected[9].ID != 900 {
 		t.Fatalf("selected avatar = %+v", selected)
+	}
+}
+
+// TestSelectAvatarSettlesForJobsOutsideTheCatalog covers the avatar path for a
+// job id the catalog was not prepared for. Select used to rebuild the catalog
+// and retry, and because the rebuilt catalog still had no bucket for the job,
+// the retry never settled: any job id above maxAvatarJob overflowed the
+// goroutine stack and killed the process on the first robot of that job,
+// instead of leaving it without avatars. A maxAvatarJob the PVF releases has to
+// select normally, so this cannot pass by refusing every job.
+func TestSelectAvatarSettlesForJobsOutsideTheCatalog(t *testing.T) {
+	items := []shared.EquipmentCatalogItem{
+		{ID: 100, ItemType: 20, Name: "hat", Path: "equipment/character/knight/avatar/cap/100.equ", UseJob: []int{12}},
+		{ID: 200, ItemType: 20, Name: "hat", Path: "equipment/character/gunner/avatar/cap/200.equ", UseJob: []int{2}},
+	}
+	rc := robotconfig.RuntimeConfig{AvatarSlots: []int{0}, MinAvatarSlots: 0}
+	if selected := SelectAvatar(items, 12, rc, func(int) int { return 0 }); len(selected) != 1 || selected[0].ID != 100 {
+		t.Fatalf("job 12 selected %+v, want its own avatar", selected)
+	}
+	if selected := SelectAvatar(items, 2, rc, func(int) int { return 0 }); len(selected) != 1 || selected[0].ID != 200 {
+		t.Fatalf("job 2 selected %+v, want its own avatar", selected)
+	}
+	// Above the PVF's job count: no avatars, and no unbounded retry either.
+	if selected := SelectAvatar(items, maxAvatarJob+1, rc, func(int) int { return 0 }); len(selected) != 0 {
+		t.Fatalf("job %d selected %+v, want none", maxAvatarJob+1, selected)
+	}
+}
+
+func TestPrepareAvatarCatalogCoversEveryPVFJob(t *testing.T) {
+	items := []shared.EquipmentCatalogItem{{ID: 100, ItemType: 20, Name: "hat", UseJob: []int{12}}}
+	rc := robotconfig.RuntimeConfig{AvatarSlots: []int{0}}
+	catalog := PrepareAvatarCatalog(items, rc)
+	for job := 0; job <= maxAvatarJob; job++ {
+		if _, ok := catalog.jobs[job]; !ok {
+			t.Fatalf("job %d has no avatar bucket; maxAvatarJob must follow the PVF's job count", job)
+		}
 	}
 }
 
@@ -371,10 +407,10 @@ func TestEquipmentSlotsNeedRepairAllowsUnavailableLevelSlots(t *testing.T) {
 	raw := make([]byte, 12*61)
 	binary.LittleEndian.PutUint32(raw[2:6], 100)
 	binary.LittleEndian.PutUint16(raw[11:13], 20)
-	if EquipmentSlotsNeedRepair(raw, items, 50, 1, rc) {
+	if EquipmentSlotsNeedRepair(raw, items, 50, 1, 0, rc) {
 		t.Fatal("level-locked slot was treated as required")
 	}
-	if !EquipmentSlotsNeedRepair(raw, items, 60, 1, rc) {
+	if !EquipmentSlotsNeedRepair(raw, items, 60, 1, 0, rc) {
 		t.Fatal("available level slot was not treated as required")
 	}
 }

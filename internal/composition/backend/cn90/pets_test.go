@@ -3,6 +3,7 @@ package cn90
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	robotcap "robot/internal/capability/robot"
@@ -172,9 +173,11 @@ func TestReconcileAppliesPetsToEquippedRobot(t *testing.T) {
 	db := openPurgeTestDatabase(t, path)
 	defer db.Close()
 	// Simulate a robot equipped by the equipment stage: worn rows carry the
-	// robot_loadout marker but no creature state exists yet.
-	if _, err := db.Exec(`INSERT INTO dnf_equipments(character_id, updated_at) VALUES ('9', '2026-01-01T00:00:00Z');
-INSERT INTO dnf_equipment_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','11','robot_loadout','1');`); err != nil {
+	// robot_loadout marker at the current version but no creature state exists
+	// yet. The version matters — an older marker would send the gate down the
+	// equipment re-roll path instead of the pet path this test covers.
+	if _, err := db.Exec(fmt.Sprintf(`INSERT INTO dnf_equipments(character_id, updated_at) VALUES ('9', '2026-01-01T00:00:00Z');
+INSERT INTO dnf_equipment_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','11','robot_loadout','%d');`, cn90LoadoutVersion)); err != nil {
 		t.Fatal(err)
 	}
 	replaced, err := applier.ReconcileRobotLoadouts(context.Background(), "robot", []robotcap.Info{{UID: 17000009, CID: 9, Name: "tester"}})
@@ -222,10 +225,13 @@ func TestReconcileRepairsCreatureRowsWrittenWithoutGBKName(t *testing.T) {
 	defer applier.Close()
 	db := openPurgeTestDatabase(t, path)
 	defer db.Close()
-	if _, err := db.Exec(`INSERT INTO dnf_equipments(character_id, updated_at) VALUES ('9', '2026-01-01T00:00:00Z');
-INSERT INTO dnf_equipment_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','11','robot_loadout','1');
+	// The equipment marker is written at the current version so the gate reaches
+	// the creature check; the pet marker's value is never compared, only its
+	// presence.
+	if _, err := db.Exec(fmt.Sprintf(`INSERT INTO dnf_equipments(character_id, updated_at) VALUES ('9', '2026-01-01T00:00:00Z');
+INSERT INTO dnf_equipment_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','11','robot_loadout','%d');
 INSERT INTO dnf_pet_entries(character_id, pet_key, item_id, pet_name, name_raw) VALUES ('9','1',60001,'petit',NULL);
-INSERT INTO dnf_pet_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','1','robot_loadout','1');`); err != nil {
+INSERT INTO dnf_pet_entry_extra(character_id, entry_key, extra_key, extra_value) VALUES ('9','1','robot_loadout','1');`, cn90LoadoutVersion)); err != nil {
 		t.Fatal(err)
 	}
 	replaced, err := applier.ReconcileRobotLoadouts(context.Background(), "robot", []robotcap.Info{{UID: 17000009, CID: 9, Name: "tester"}})

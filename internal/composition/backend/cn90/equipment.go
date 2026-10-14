@@ -25,6 +25,21 @@ const (
 
 	cn90InitialEquipmentCreateValue = uint32(1)
 	cn90InitialEquipmentDefaultDur  = 40
+
+	// cn90LoadoutMarkerKey marks a row the robot generated. Generate only: a row
+	// without it was written by the server or by an operator and is never owned
+	// by the robot.
+	cn90LoadoutMarkerKey = "robot_loadout"
+	// cn90LoadoutVersion is the marker's value. Bumping it re-rolls the whole
+	// fleet exactly once: equipmentNeedsLoadout treats a row carrying an older
+	// value as unmarked, so every robot written by an earlier version is rebuilt
+	// on the next startup and operator edits survive from then on. Without the
+	// version, a rule that changes what the selector would pick could never reach
+	// a robot that already wears a loadout.
+	//
+	//	1 — first generated loadouts
+	//	2 — armor follows the transfer branch's mastered material
+	cn90LoadoutVersion = 2
 )
 
 // cn90WornSlotForItemType maps the capability/pvf equipment type to the DNF90
@@ -44,11 +59,11 @@ var cn90WornSlotForItemType = map[int]int{
 	13: 23, // earring
 }
 
-// selectWornEquipment picks one item per configured worn slot for the level and
-// job. The generic selector covers item types 1..12; earrings (13) are picked
-// with the same level/rarity/job rules.
-func selectWornEquipment(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig, level, job int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
-	selected := equipmentcap.SelectEquipment(items, level, job, rc, randIntn)
+// selectWornEquipment picks one item per configured worn slot for the level,
+// job and transfer branch. The generic selector covers item types 1..12;
+// earrings (13) are picked with the same level/rarity/job rules.
+func selectWornEquipment(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig, level, job, grow int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+	selected := equipmentcap.SelectEquipment(items, level, job, grow, rc, randIntn)
 	worn := make(map[int]shared.EquipmentCatalogItem, len(selected)+1)
 	for itemType, item := range selected {
 		slot, ok := cn90WornSlotForItemType[itemType]
@@ -212,12 +227,12 @@ func (a *SQLiteLoadoutApplier) loadoutArchive() *cn90PVFArchive {
 
 // applyRobotLoadout selects and writes the robot's worn equipment and avatars.
 // It runs inside the persistence executor so the full replacement is ordered.
-func (a *SQLiteLoadoutApplier) applyRobotLoadout(ctx context.Context, db *sql.DB, characterID string, job, level int) error {
+func (a *SQLiteLoadoutApplier) applyRobotLoadout(ctx context.Context, db *sql.DB, characterID string, job, level, grow int) error {
 	randIntn := a.RandIntn
 	if randIntn == nil {
 		randIntn = cryptoRandIntn
 	}
-	worn := selectWornEquipment(a.Equipment, a.Config, level, job, randIntn)
+	worn := selectWornEquipment(a.Equipment, a.Config, level, job, grow, randIntn)
 	avatars := equipmentcap.SelectAvatar(a.Equipment, cn90AvatarJob(job), a.Config, randIntn)
 	if len(worn) == 0 && len(avatars) == 0 {
 		return fmt.Errorf("90CN loadout has no compatible items for level=%d job=%d", level, job)
@@ -312,7 +327,7 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 			"durability":               strconv.Itoa(durability),
 			"max_durability":           strconv.Itoa(durability),
 			"repair_gold":              "0",
-			"robot_loadout":            "1",
+			cn90LoadoutMarkerKey:       strconv.Itoa(cn90LoadoutVersion),
 		} {
 			if err := insertExtra(slot, key, value); err != nil {
 				return err
@@ -345,7 +360,7 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 			"current_exe_equipment_type": strconv.Itoa(slot),
 			"avatar_ability_no":          "0",
 			"equipment_type":             token,
-			"robot_loadout":              "1",
+			cn90LoadoutMarkerKey:         strconv.Itoa(cn90LoadoutVersion),
 		} {
 			if err := insertExtra(slot, key, value); err != nil {
 				return err

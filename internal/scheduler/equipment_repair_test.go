@@ -45,7 +45,7 @@ func TestRepairRobotEquipmentWritesOnlyInvalidRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	rc := robotconfig.Default()
-	raw := equipcap.BuildEquipmentSlots(items, 50, 1, rc, func(int) int { return 0 }, nil)
+	raw := equipcap.BuildEquipmentSlots(items, 50, 1, 0, rc, func(int) int { return 0 }, nil)
 	invalid := append([]byte(nil), raw...)
 	binary.LittleEndian.PutUint16(invalid[11:13], 21)
 	db := &equipmentRepairTestDatabase{
@@ -67,7 +67,7 @@ func TestRepairRobotEquipmentWritesOnlyInvalidRecords(t *testing.T) {
 	if len(db.saved) != 1 || len(db.saved[102]) == 0 {
 		t.Fatalf("saved records=%v, want cid 102 only", db.saved)
 	}
-	if equipcap.EquipmentSlotsNeedRepair(db.saved[102], equipmentCatalogByID(items), 50, 1, rc) {
+	if equipcap.EquipmentSlotsNeedRepair(db.saved[102], equipmentCatalogByID(items), 50, 1, 0, rc) {
 		t.Fatal("repaired equipment remains invalid")
 	}
 }
