@@ -143,10 +143,14 @@ function Invoke-Start {
     Write-Host "backup     : $backup"
 
     $text = Get-Content -Raw $IniPath
+    # Presence is tested on its own: a replacement that lands the same text (the
+    # tier already equals $Tier) must not read as "key missing".
+    if (-not [regex]::IsMatch($text, '(?m)^auto_target_online_count\s*=')) {
+        throw 'auto_target_online_count was not found in the config; refusing to guess.'
+    }
     # [^\r\n]* rather than .* so the CR of a CRLF line is not swallowed into
     # the match and dropped on rewrite; the config keeps its line endings.
     $new  = [regex]::Replace($text, '(?m)^auto_target_online_count\s*=[^\r\n]*', "auto_target_online_count = $Tier")
-    if ($new -eq $text) { throw 'auto_target_online_count was not found in the config; refusing to guess.' }
     Set-Content -Path $IniPath -Value $new -NoNewline -Encoding ASCII
     $current = (Select-String -Path $IniPath -Pattern '^\s*auto_target_online_count\s*=' | Select-Object -First 1).Line
     Write-Host "tier       : $($current.Trim())"
