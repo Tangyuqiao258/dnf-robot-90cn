@@ -2,8 +2,10 @@ package cn90
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	equipmentcap "robot/internal/capability/equipment"
@@ -157,36 +159,41 @@ func TestRobotLoadoutWritesWornRows(t *testing.T) {
 	// Slot 23 is 耳环, which a level-70 character is not owed: every earring in
 	// the archive needs level 90. TestRobotLoadoutGivesTheEarringOnlyToLevel90
 	// covers the slot itself.
-	for _, want := range []string{"11", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22"} {
+	for _, want := range []string{"12", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23"} {
 		if !containsIntList(slots, want) {
 			t.Fatalf("worn slots %q missing %s", slots, want)
 		}
 	}
-	if containsIntList(slots, "23") {
+	if containsIntList(slots, "25") {
 		t.Fatalf("worn slots %q carry an earring below level %d", slots, equipmentcap.EarringMinLevel)
 	}
 	// Weapon reinforcement is projected through ext_data0 and comes from the
 	// level band, which for level 70 is 10..11.
 	var reinforce string
-	if err := db.QueryRow(`SELECT extra_value FROM dnf_equipment_entry_extra WHERE character_id='9' AND entry_key='11' AND extra_key='ext_data0'`).Scan(&reinforce); err != nil {
+	if err := db.QueryRow(`SELECT extra_value FROM dnf_equipment_entry_extra WHERE character_id='9' AND entry_key='12' AND extra_key='ext_data0'`).Scan(&reinforce); err != nil {
 		t.Fatal(err)
 	}
 	if reinforce != "10" {
 		t.Fatalf("weapon ext_data0 = %q, want 10", reinforce)
 	}
 	var durability string
-	if err := db.QueryRow(`SELECT extra_value FROM dnf_equipment_entry_extra WHERE character_id='9' AND entry_key='11' AND extra_key='durability'`).Scan(&durability); err != nil {
+	if err := db.QueryRow(`SELECT extra_value FROM dnf_equipment_entry_extra WHERE character_id='9' AND entry_key='12' AND extra_key='durability'`).Scan(&durability); err != nil {
 		t.Fatal(err)
 	}
 	if durability != "40" {
 		t.Fatalf("weapon durability = %q", durability)
 	}
 	var raw []byte
-	if err := db.QueryRow(`SELECT raw_entry FROM dnf_equipment_entries WHERE character_id='9' AND entry_key='11'`).Scan(&raw); err != nil {
+	if err := db.QueryRow(`SELECT raw_entry FROM dnf_equipment_entries WHERE character_id='9' AND entry_key='12'`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	if len(raw) != 43 || raw[0] != 11 || uint32(raw[1])|uint32(raw[2])<<8|uint32(raw[3])<<16|uint32(raw[4])<<24 != 101 {
+	if len(raw) != 43 || raw[0] != 12 || uint32(raw[1])|uint32(raw[2])<<8|uint32(raw[3])<<16|uint32(raw[4])<<24 != 101 {
 		t.Fatalf("weapon raw entry = %X", raw)
+	}
+	// The displayed +N reaches the client through the summary byte as well as
+	// through the ext_data0 extra.
+	if raw[9] != 10 {
+		t.Fatalf("weapon summary +N = %d, want the band floor 10", raw[9])
 	}
 	// Avatars use the actor slot with the direct appearance extra.
 	var avatarCount int
@@ -209,6 +216,136 @@ func TestRobotLoadoutWritesWornRows(t *testing.T) {
 	}
 	if appearance != "0" {
 		t.Fatalf("avatar appearance slot = %q", appearance)
+	}
+}
+
+// TestRobotLoadoutPlacesTheTitleInTheActorTitleSlot covers the reason the worn
+// map carries actor slots at all. The server resolves an entry's actor slot
+// from current_exe_equipment_type and only falls back to translating a legacy
+// worn number when that extra is absent -- and the legacy numbering has no slot
+// that maps to 13, so a title written the legacy way could never reach the
+// client's title box. The row must therefore name slot 13 outright and carry
+// the runtime-move marker that makes the server take that first branch.
+func TestRobotLoadoutPlacesTheTitleInTheActorTitleSlot(t *testing.T) {
+	path := newEquipmentTestDatabase(t)
+	config := robotconfig.Default()
+	config.EquipSlots = []int{1, 3}
+	config.AvatarSlots = []int{0}
+	config.MinAvatarSlots = 0
+	config.PetEnabled = false
+	config.EquipRarityMax = 5
+	config.TitleEnabled = true
+	config.TitleItem = 113
+	config.TitleTopItem = 114
+	config.TitleTopLevel = 90
+	items := append(equipmentTestCatalog(),
+		shared.EquipmentCatalogItem{ID: 113, Name: "兽人守护神", Path: "equipment/character/common/title/113.equ", ItemType: 2, Level: 1, Rarity: 3},
+		shared.EquipmentCatalogItem{ID: 114, Name: "天选之人", Path: "equipment/character/common/title/114.equ", ItemType: 2, Level: 1, Rarity: 3},
+	)
+	for _, testCase := range []struct {
+		level    int
+		wantItem string
+	}{
+		{level: 70, wantItem: "113"},
+		{level: 90, wantItem: "114"},
+	} {
+		setEquipmentTestLevel(t, path, testCase.level)
+		applier, err := NewSQLiteLoadoutApplier(context.Background(), path, config, items, "", func(int) int { return 0 })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := applier.applyAccountLoadout(context.Background(), "robot17000009", robotcap.Info{}); err != nil {
+			applier.Close()
+			t.Fatal(err)
+		}
+		applier.Close()
+		db := openPurgeTestDatabase(t, path)
+		var entryKey, itemID string
+		if err := db.QueryRow(`SELECT entry_key, item_id FROM dnf_equipment_entries WHERE character_id='9' AND slot_index=?`, cn90TitleSlot).Scan(&entryKey, &itemID); err != nil {
+			db.Close()
+			t.Fatalf("level %d title lookup: %v", testCase.level, err)
+		}
+		if itemID != testCase.wantItem {
+			db.Close()
+			t.Fatalf("level %d title = %s, want %s", testCase.level, itemID, testCase.wantItem)
+		}
+		extras := map[string]string{}
+		rows, err := db.Query(`SELECT extra_key, extra_value FROM dnf_equipment_entry_extra WHERE character_id='9' AND entry_key=?`, entryKey)
+		if err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var key, value string
+			if err := rows.Scan(&key, &value); err != nil {
+				rows.Close()
+				db.Close()
+				t.Fatal(err)
+			}
+			extras[key] = value
+		}
+		rows.Close()
+		db.Close()
+		// The runtime-move marker is what stops the server translating the row
+		// as an untouched legacy worn entry.
+		if extras["current_exe_runtime_move"] != "1" {
+			t.Fatalf("level %d title runtime move = %q, want 1", testCase.level, extras["current_exe_runtime_move"])
+		}
+		if extras["current_exe_equipment_type"] != strconv.Itoa(cn90TitleSlot) {
+			t.Fatalf("level %d title equipment type = %q, want %d", testCase.level, extras["current_exe_equipment_type"], cn90TitleSlot)
+		}
+	}
+}
+
+// TestBuildCN90WornRawEntryPinsTheLegacySummaryLayout pins the byte offsets of
+// the 43-byte summary, because they are the ones that decide whether the client
+// draws an amplified item as 增幅 or as a plain 强化.
+//
+// The summary is NOT a truncation of the 119-byte row: the red-text pair sits
+// at +21 (type) and +22 (marker) here, while the 119-byte row keeps it at +19
+// and +20. Writing the 119-byte offsets into this layout lands on the enchant
+// area at +16..+20. The shape asserted for the amplified item is the one real
+// amplified rows in the live save carry: type 4, marker 7.
+func TestBuildCN90WornRawEntryPinsTheLegacySummaryLayout(t *testing.T) {
+	raw := buildCN90WornRawEntry(13, 101, 40, 15, 4, 7)
+	if len(raw) != 43 {
+		t.Fatalf("raw length = %d, want 43", len(raw))
+	}
+	if raw[0] != 13 {
+		t.Fatalf("slot = %d, want 13", raw[0])
+	}
+	if id := binary.LittleEndian.Uint32(raw[1:5]); id != 101 {
+		t.Fatalf("item id = %d, want 101", id)
+	}
+	if value := binary.LittleEndian.Uint32(raw[5:9]); value != cn90InitialEquipmentCreateValue {
+		t.Fatalf("create value = %d, want %d", value, cn90InitialEquipmentCreateValue)
+	}
+	if raw[9] != 15 {
+		t.Fatalf("displayed +N = %d, want 15", raw[9])
+	}
+	if durability := binary.LittleEndian.Uint16(raw[10:12]); durability != 40 {
+		t.Fatalf("durability = %d, want 40", durability)
+	}
+	if raw[21] != 4 {
+		t.Fatalf("red-text type = %d, want 4", raw[21])
+	}
+	if marker := binary.LittleEndian.Uint16(raw[22:24]); marker != 7 {
+		t.Fatalf("red-text marker = %d, want 7", marker)
+	}
+
+	// A plain 强化 item: the level still shows, the red-text pair stays zero.
+	plain := buildCN90WornRawEntry(11, 101, 40, 10, 0, 0)
+	if plain[9] != 10 {
+		t.Fatalf("plain displayed +N = %d, want 10", plain[9])
+	}
+	if plain[21] != 0 || plain[22] != 0 || plain[23] != 0 {
+		t.Fatalf("plain red-text bytes = %X, want zero", plain[21:24])
+	}
+
+	// An item with a type but no value must not be stamped as amplified: the
+	// client would draw a red item whose option reads zero.
+	if unamplified := buildCN90WornRawEntry(11, 101, 40, 10, 4, 0); unamplified[21] != 0 || unamplified[22] != 0 {
+		t.Fatalf("type without value = %X, want zero", unamplified[21:24])
 	}
 }
 
@@ -249,7 +386,7 @@ func TestRobotLoadoutGivesTheEarringOnlyToLevel90(t *testing.T) {
 		applier.Close()
 		db := openPurgeTestDatabase(t, path)
 		var itemID int
-		err = db.QueryRow(`SELECT item_id FROM dnf_equipment_entries WHERE character_id='9' AND slot_index=23`).Scan(&itemID)
+		err = db.QueryRow(`SELECT item_id FROM dnf_equipment_entries WHERE character_id='9' AND slot_index=25`).Scan(&itemID)
 		db.Close()
 		if testCase.want == 0 {
 			if err == nil {

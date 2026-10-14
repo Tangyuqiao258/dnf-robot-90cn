@@ -13,11 +13,11 @@ func TestPopulationReportMeasuresLoadouts(t *testing.T) {
 	defer db.Close()
 	if _, err := db.Exec(`
 INSERT INTO dnf_equipment_entries(character_id, entry_key, slot_index, item_id, bind_flag, raw_entry) VALUES
- ('9','11',11,101,0,NULL),
- ('9','13',13,102,0,NULL),
+ ('9','12',12,101,0,NULL),
+ ('9','14',14,102,0,NULL),
  ('9','0',0,201,0,NULL),
  ('9','1',1,202,0,NULL),
- ('20','11',11,103,0,NULL);
+ ('20','12',12,103,0,NULL);
 INSERT INTO dnf_characters(character_id, account_id, slot, name, job, level, delete_flag, tutorial_completed) VALUES ('20','robot17000009',1,'测试乙','2',70,0,1);`); err != nil {
 		t.Fatal(err)
 	}

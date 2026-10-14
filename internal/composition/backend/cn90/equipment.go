@@ -42,24 +42,44 @@ const (
 	//	3 — one set per equipment family, gear level on the 5s, rarity and
 	//	    upgrade from the level band, 增幅 from level 71, 耳环 at level 90
 	//	4 — 时装 follows the level band, 稀有装扮 from level 71, 皮肤 never
-	cn90LoadoutVersion = 4
+	//	5 — the raw summary carries the displayed +N, the red-text type and its
+	//	    marker, so an amplified item stops reaching the client as a 强化
+	//	6 — rows carry the actor slot and the runtime-move marker, so the server
+	//	    stops translating them as legacy worn slots and a 称号 reaches the
+	//	    client in the slot 13 the client keeps for it
+	cn90LoadoutVersion = 6
 )
 
-// cn90WornSlotForItemType maps the capability/pvf equipment type to the DNF90
-// worn slot (server initialEquipmentSlotMap).
+// cn90TitleSlot is the actor slot the client keeps for 称号: the last of the
+// fourteen base appearance slots, between the weapon at 12 and the coat at 14.
+// It has no counterpart in the server's legacy worn numbering, which is why a
+// title can only be placed by naming the actor slot outright.
+const cn90TitleSlot = 13
+
+// cn90WornSlotForItemType maps the capability/pvf equipment type to the actor
+// equipment slot the current client renders it in.
+//
+// This is the numbering a real client's own equip path writes -- the server
+// translates only untouched legacy rows (see currentEXEActorEquipmentSlot and
+// currentActorMode0AppearanceSlot), and every row the robot writes carries
+// current_exe_equipment_type, so it is the one that decides. The server's
+// legacy worn numbering (server initialEquipmentSlotMap) is one lower from the
+// coat on -- 11 weapon, 13 coat .. 23 earring -- puts the secondary weapon at
+// 24 and has no slot at all for a title.
 var cn90WornSlotForItemType = map[int]int{
-	1:  11, // weapon
-	3:  13, // coat
-	4:  14, // shoulder
-	5:  15, // pants
-	6:  16, // shoes
-	7:  17, // waist
-	8:  18, // amulet
-	9:  19, // wrist
-	10: 20, // ring
-	11: 21, // support
-	12: 22, // magic stone
-	13: 23, // earring
+	1:  12, // weapon
+	2:  13, // title
+	3:  14, // coat
+	4:  15, // shoulder
+	5:  16, // pants
+	6:  17, // shoes
+	7:  18, // waist
+	8:  19, // amulet
+	9:  20, // wrist
+	10: 21, // ring
+	11: 22, // support
+	12: 23, // magic stone
+	13: 25, // earring -- 24 is the secondary weapon
 }
 
 // selectWornEquipment picks one item per configured worn slot for the level,
@@ -96,13 +116,25 @@ func cn90AvatarJob(job int) int {
 }
 
 // buildCN90WornRawEntry mirrors the server's 43-byte initial-equipment
-// summary: slot, item id, create value, durability at +10 and zero tail.
-func buildCN90WornRawEntry(slot int, itemID int, durability uint16) []byte {
+// summary: slot, item id, create value, the displayed +N at +9, durability at
+// +10 and, for an amplified item, the red-text pair at +21/+22.
+//
+// This summary is not a truncation of the 119-byte row: the red-text type and
+// its marker sit at +21 and +22 here, but at +19 and +20 there. Writing the
+// 119-byte offsets into this layout lands on the enchant area at +16..+20 and
+// destroys it, which is why an amplified item used to reach the client as a
+// plain 强化.
+func buildCN90WornRawEntry(slot int, itemID int, durability uint16, upgrade byte, amplifyAttribute, amplifyValue int) []byte {
 	raw := make([]byte, 43)
 	raw[0] = byte(slot)
 	binary.LittleEndian.PutUint32(raw[1:5], uint32(itemID))
 	binary.LittleEndian.PutUint32(raw[5:9], cn90InitialEquipmentCreateValue)
+	raw[9] = upgrade
 	binary.LittleEndian.PutUint16(raw[10:12], durability)
+	if amplifyValue > 0 {
+		raw[21] = byte(amplifyAttribute)
+		binary.LittleEndian.PutUint16(raw[22:24], uint16(amplifyValue))
+	}
 	return raw
 }
 
@@ -217,9 +249,9 @@ func (a *SQLiteLoadoutApplier) applyRobotLoadout(ctx context.Context, db *sql.DB
 //
 // Every worn item is stamped with its level band's upgrade range, and from the
 // band that carries 增幅 (level 71) it is also given the robot's amplification
-// attribute and that attribute's initial value. Avatars are never upgraded or
-// amplified: they are cosmetic, and the client draws an amplify marker on any
-// slot that carries the extras.
+// attribute and that attribute's initial value. A pinned 称号 and avatars are
+// never upgraded or amplified: they are cosmetic, and the client draws an
+// amplify marker on any slot that carries the extras.
 func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql.Tx, characterID string, worn, avatars map[int]shared.EquipmentCatalogItem, level, job, grow int, randIntn func(int) int) error {
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx,
@@ -263,6 +295,50 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 		if item.ID <= 0 {
 			continue
 		}
+		// The mirrors every row carries. The server resolves an entry's actor
+		// slot from current_exe_equipment_type first and only falls back to the
+		// stored slot index -- which it then translates as legacy worn
+		// numbering -- when that extra is absent. Writing the actor slot
+		// outright is what the game's own equip path does, and it is what keeps
+		// the server from reinterpreting these rows as untouched PVF starter
+		// gear.
+		runtimeSlot := map[string]string{
+			"current_exe_equipment_type": strconv.Itoa(slot),
+			"equipment_slot":             strconv.Itoa(slot),
+			"equipped_slot":              strconv.Itoa(slot),
+			"current_exe_runtime_move":   "1",
+		}
+		insertRuntimeSlot := func(extras map[string]string) error {
+			for key, value := range runtimeSlot {
+				extras[key] = value
+			}
+			for key, value := range extras {
+				if err := insertExtra(slot, key, value); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if slot == cn90TitleSlot {
+			// A title is worn, never drawn, and it is never upgraded or
+			// amplified -- the client would draw the amplify marker on it. It
+			// carries no durability either: the client shows none for a title.
+			if err := insertEntry(slot, item.ID, buildCN90WornRawEntry(slot, item.ID, 0, 0, 0, 0)); err != nil {
+				return err
+			}
+			token, _ := a.equipmentMetadataFor(item)
+			if err := insertRuntimeSlot(map[string]string{
+				"source":                   "pvf_create_equipment_list",
+				"item_kind":                "equipment",
+				"pvf_path":                 item.Path,
+				"current_exe_create_value": strconv.FormatUint(uint64(cn90InitialEquipmentCreateValue), 10),
+				"equipment_type":           token,
+				cn90LoadoutMarkerKey:       strconv.Itoa(cn90LoadoutVersion),
+			}); err != nil {
+				return err
+			}
+			continue
+		}
 		durability := item.Durability
 		if durability <= 0 {
 			durability = cn90InitialEquipmentDefaultDur
@@ -271,12 +347,16 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 			durability = 0xffff
 		}
 		reinforce := rollBandUpgrade(band, randIntn)
-		if err := insertEntry(slot, item.ID, buildCN90WornRawEntry(slot, item.ID, uint16(durability))); err != nil {
+		amplifyValue := 0
+		if amplifyAttribute != 0 {
+			amplifyValue = a.Amplify.InitialValue(amplifyAttribute, band.Rarity)
+		}
+		if err := insertEntry(slot, item.ID, buildCN90WornRawEntry(slot, item.ID, uint16(durability), reinforce, amplifyAttribute, amplifyValue)); err != nil {
 			return err
 		}
 		token, native := a.equipmentMetadataFor(item)
 		_ = token
-		for key, value := range map[string]string{
+		if err := insertRuntimeSlot(map[string]string{
 			"source":                   "pvf_create_equipment_list",
 			"pvf_path":                 item.Path,
 			"current_exe_create_value": strconv.FormatUint(uint64(cn90InitialEquipmentCreateValue), 10),
@@ -284,10 +364,8 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 			"max_durability":           strconv.Itoa(durability),
 			"repair_gold":              "0",
 			cn90LoadoutMarkerKey:       strconv.Itoa(cn90LoadoutVersion),
-		} {
-			if err := insertExtra(slot, key, value); err != nil {
-				return err
-			}
+		}); err != nil {
+			return err
 		}
 		if native > 0 {
 			if err := insertExtra(slot, "equipment_type", strconv.Itoa(native)); err != nil {
@@ -299,12 +377,19 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 				return err
 			}
 		}
-		if value := a.Amplify.InitialValue(amplifyAttribute, band.Rarity); value > 0 {
-			if err := insertExtra(slot, "amplify_type", strconv.Itoa(amplifyAttribute)); err != nil {
-				return err
-			}
-			if err := insertExtra(slot, "amplify_value", strconv.Itoa(value)); err != nil {
-				return err
+		if amplifyValue > 0 {
+			for key, value := range map[string]string{
+				"amplify_type":  strconv.Itoa(amplifyAttribute),
+				"amplify_value": strconv.Itoa(amplifyValue),
+				// The row projection reads the red-text pair under these names
+				// only; amplify_type/amplify_value on their own never reach the
+				// client's item row.
+				"byte_13":   strconv.Itoa(amplifyAttribute),
+				"marker_16": strconv.Itoa(amplifyValue),
+			} {
+				if err := insertExtra(slot, key, value); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -313,7 +398,7 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 		if item.ID <= 0 {
 			continue
 		}
-		if err := insertEntry(slot, item.ID, buildCN90WornRawEntry(slot, item.ID, 0)); err != nil {
+		if err := insertEntry(slot, item.ID, buildCN90WornRawEntry(slot, item.ID, 0, 0, 0, 0)); err != nil {
 			return err
 		}
 		token, _ := a.equipmentMetadataFor(item)
@@ -322,6 +407,9 @@ func (a *SQLiteLoadoutApplier) replaceEquipmentRows(ctx context.Context, tx *sql
 			"item_kind":                  "avatar",
 			"pvf_path":                   item.Path,
 			"current_exe_equipment_type": strconv.Itoa(slot),
+			"equipment_slot":             strconv.Itoa(slot),
+			"equipped_slot":              strconv.Itoa(slot),
+			"current_exe_runtime_move":   "1",
 			"avatar_ability_no":          "0",
 			"equipment_type":             token,
 			cn90LoadoutMarkerKey:         strconv.Itoa(cn90LoadoutVersion),
