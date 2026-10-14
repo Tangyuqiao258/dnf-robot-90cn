@@ -13,6 +13,12 @@ func jobFromEquipmentPath(path string) int {
 		return 11
 	case strings.Contains(p, "/character/swordman/"):
 		return 0
+	case strings.Contains(p, "/character/knight/"):
+		return 12
+	case strings.Contains(p, "/character/demoniclancer/"):
+		return 13
+	case strings.Contains(p, "/character/gunblader/"):
+		return 15
 	case strings.Contains(p, "/character/fighter/at_avatar/"):
 		return 7
 	case strings.Contains(p, "/character/fighter/"):
@@ -153,6 +159,14 @@ func jobID(job string) int {
 		return 9
 	case "creatormage":
 		return 10
+	case "atswordman":
+		return 11
+	case "knight":
+		return 12
+	case "demoniclancer":
+		return 13
+	case "gunblader":
+		return 15
 	default:
 		return -1
 	}
