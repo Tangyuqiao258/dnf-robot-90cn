@@ -11,6 +11,9 @@ coverage.out
 # Local protocol investigation captures
 /real_inventory_sample.tsv
 /robot*_inventory.hex
+# Live console screenshots: evidence for one run of one machine, kept next to
+# the doc that cites them rather than in the history.
+/console-*.png
 
 # Python tooling artifacts
 __pycache__/
