@@ -3,6 +3,8 @@ package robotconfig
 type RuntimeConfig struct {
 	LevelMin                 int    `json:"level_min"`
 	LevelMax                 int    `json:"level_max"`
+	LevelPlan                string `json:"level_plan"`
+	PoolSize                 int    `json:"pool_size"`
 	Jobs                     []int  `json:"jobs"`
 	GrowTypes                []int  `json:"grow_types"`
 	ReconcileAwakening       bool   `json:"reconcile_awakening"`

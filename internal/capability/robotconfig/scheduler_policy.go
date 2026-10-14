@@ -13,6 +13,22 @@ func TargetCapacity(rc RuntimeConfig) int {
 	return target
 }
 
+// PoolCapacity is how many characters the robot directory should hold. It is
+// the online target unless the operator asked for a larger pool.
+//
+// A pool wider than the online target is what lets a robot be logged in on
+// demand -- one near the level of the player who just walked in -- without
+// creating it first: a create is a provisioning round trip plus a loadout
+// write, far too slow to answer "the player just moved". The surplus
+// characters stay logged out until something asks for them.
+func PoolCapacity(rc RuntimeConfig) int {
+	pool := rc.PoolSize
+	if target := TargetCapacity(rc); pool < target {
+		pool = target
+	}
+	return pool
+}
+
 func CreateRoom(rc RuntimeConfig, existing int) int {
 	room := TargetCapacity(rc) - existing
 	if room < 0 {

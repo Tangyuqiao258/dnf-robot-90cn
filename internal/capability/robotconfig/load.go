@@ -30,6 +30,8 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc := Default()
 	rc.LevelMin = dec.Int("create", "level_min", rc.LevelMin)
 	rc.LevelMax = dec.Int("create", "level_max", rc.LevelMax)
+	rc.LevelPlan = dec.String("create", "level_plan", rc.LevelPlan)
+	rc.PoolSize = dec.Int("create", "pool_size", rc.PoolSize)
 	rc.Jobs = dec.IntList("create", "jobs", rc.Jobs)
 	rc.GrowTypes = dec.IntList("create", "grow_types", rc.GrowTypes)
 	rc.ReconcileAwakening = dec.Bool("create", "reconcile_awakening", rc.ReconcileAwakening)

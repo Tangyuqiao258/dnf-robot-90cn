@@ -306,6 +306,104 @@ func TestBuildProtocolRobotPlansKeepsTheDrawnLevelAwayFromDungeons(t *testing.T)
 	}
 }
 
+// TestBuildProtocolRobotPlansDrawsLevelsFromThePlan covers the create path the
+// supervisor actually uses: one plan per robot, each with its own uid. The
+// level has to come from the plan's pool by uid, so the composition holds
+// however many times provisioning runs and wherever a restart lands.
+func TestBuildProtocolRobotPlansDrawsLevelsFromThePlan(t *testing.T) {
+	optionFor := func(t *testing.T, uid int) ProtocolPlanOptions {
+		t.Helper()
+		return ProtocolPlanOptions{
+			Count: 1, IDStart: uid, AccountPrefix: "acct",
+			Config: robotconfig.RuntimeConfig{
+				LevelMin: 50, LevelMax: 85, LevelPlan: "90-90:2,20-24:2",
+				RobotUIDStart: 17001000, RobotUIDEnd: 17001999,
+				Jobs: []int{0}, GrowTypes: []int{2}, SpawnFallbackVillage: 1,
+			},
+			Names: robottemplate.NameTemplates{Common: []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"}},
+			Maps: []shared.MapCatalogItem{{
+				Village: 4, Area: 1, Level: 1, Use: true,
+				Rectangles: []shared.MapRectangle{{XMin: 0, XMax: 100, YMin: 0, YMax: 100}},
+			}},
+			JobGrows:    map[int][]int{0: {1}},
+			RandIntn:    func(int) int { return 0 },
+			RandBetween: func(min, max int) int { return min },
+		}
+	}
+	// The pool deals the bands round-robin, so the uids alternate between them
+	// instead of handing the first ninety-nine robots the top band.
+	want := []int{90, 20, 90, 20, 90, 20}
+	for offset, level := range want {
+		uid := 17001000 + offset
+		plans, err := BuildProtocolRobotPlans(optionFor(t, uid))
+		if err != nil || len(plans) != 1 {
+			t.Fatalf("uid=%d plans=%+v err=%v", uid, plans, err)
+		}
+		if plans[0].Info.Level != level {
+			t.Fatalf("uid=%d level=%d want %d", uid, plans[0].Info.Level, level)
+		}
+	}
+	// The plan outranks level_min..level_max even when it points outside them:
+	// it is the operator's table, not a hint.
+	if plans, err := BuildProtocolRobotPlans(optionFor(t, 17001001)); err != nil || plans[0].Info.Level != 20 {
+		t.Fatalf("level 20 is below level_min 50 and was not planned: %+v err=%v", plans, err)
+	}
+}
+
+// TestBuildProtocolRobotPlansKeepsThePlanOverTheEntranceGuard covers the clash
+// between the two level rules. 赫顿玛尔's main town -- where 凯丽 and 风振 stand
+// and where the fleet keeps its resident crowd -- is itself a dungeon gate with
+// DungeonLevel 81, so the entrance guard lifted every low-level robot placed
+// there to 82..85 and drained the plan's low bands. A configured plan owns the
+// level; the guard stays for configs that have none.
+func TestBuildProtocolRobotPlansKeepsThePlanOverTheEntranceGuard(t *testing.T) {
+	plans, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
+		Count: 1, IDStart: 17001000, AccountPrefix: "acct",
+		Config: robotconfig.RuntimeConfig{
+			LevelMin: 50, LevelMax: 85, LevelPlan: "20-24:1",
+			RobotUIDStart: 17001000, RobotUIDEnd: 17001999,
+			Jobs: []int{0}, GrowTypes: []int{0, 1, 2}, SpawnFallbackVillage: 1,
+		},
+		Names: robottemplate.NameTemplates{Common: []string{"Alpha"}},
+		Maps: []shared.MapCatalogItem{{
+			Village: 39, Area: 0, Level: 1, Use: true, DungeonGate: true, DungeonLevel: 81,
+			Rectangles: []shared.MapRectangle{{XMin: 0, XMax: 100, YMin: 0, YMax: 100}},
+		}},
+		JobGrows:    map[int][]int{0: {1, 2}},
+		RandIntn:    func(int) int { return 0 },
+		RandBetween: func(min, max int) int { return min },
+	})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%+v err=%v", plans, err)
+	}
+	if plans[0].Info.Village != 39 || plans[0].Info.Area != 0 {
+		t.Fatalf("the robot was not placed on the gate map: %+v", plans[0].Info)
+	}
+	if plans[0].Info.Level != 20 {
+		t.Fatalf("entrance guard rewrote the planned level to %d, want 20", plans[0].Info.Level)
+	}
+}
+
+// TestBuildProtocolRobotPlansRejectsABrokenLevelPlan keeps a typo in the ini
+// from quietly dressing the fleet on the uniform draw instead.
+func TestBuildProtocolRobotPlansRejectsABrokenLevelPlan(t *testing.T) {
+	_, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
+		Count: 1, IDStart: 17001000, AccountPrefix: "acct",
+		Config: robotconfig.RuntimeConfig{
+			LevelMin: 50, LevelMax: 85, LevelPlan: "90-89:5",
+			RobotUIDStart: 17001000, RobotUIDEnd: 17001999,
+			Jobs: []int{0}, GrowTypes: []int{0}, SpawnFallbackVillage: 1,
+		},
+		Names:       robottemplate.NameTemplates{Common: []string{"Alpha"}},
+		JobGrows:    map[int][]int{0: {1}},
+		RandIntn:    func(int) int { return 0 },
+		RandBetween: func(min, max int) int { return min },
+	})
+	if err == nil {
+		t.Fatal("a broken level plan was accepted")
+	}
+}
+
 func TestBuildProtocolRobotPlansHonoursSeededOccupancy(t *testing.T) {
 	plans, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
 		Count: 1, IDStart: 17000000, AccountPrefix: "acct",

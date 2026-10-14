@@ -131,8 +131,11 @@ func (s *RobotSupervisor) assignIdleAutoActors(rc robotconfig.RuntimeConfig) {
 // provisionMissingRobots runs one bounded create batch when the robot directory
 // is below the fixed target. It reports whether this tick was spent
 // provisioning (the caller then skips online assignment).
+//
+// The target is the pool capacity, not the online target: a directory wider
+// than the online fleet is the reserve the floating layer logs in on demand.
 func (s *RobotSupervisor) provisionMissingRobots(rc robotconfig.RuntimeConfig) bool {
-	target := robotconfig.TargetCapacity(rc)
+	target := robotconfig.PoolCapacity(rc)
 	if target <= 0 {
 		return false
 	}

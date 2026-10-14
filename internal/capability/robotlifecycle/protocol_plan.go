@@ -2,6 +2,7 @@ package robotlifecycle
 
 import (
 	"fmt"
+	"strings"
 
 	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
@@ -67,9 +68,13 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 	if levelMax < levels {
 		levelMax = levels
 	}
+	env := protocolPlanRandom{randIntn: options.RandIntn, randBetween: options.RandBetween, policy: options.CrowdPolicy}
+	levelPool, err := buildLevelPool(options.Config, env.RandBetween)
+	if err != nil {
+		return nil, err
+	}
 	plans := make([]ProtocolRobotPlan, 0, options.Count)
 	used := make(map[string]struct{}, options.Count)
-	env := protocolPlanRandom{randIntn: options.RandIntn, randBetween: options.RandBetween, policy: options.CrowdPolicy}
 	spawnMaps := options.Maps
 	if !options.Config.SpawnFixed {
 		spawnMaps = robotspawn.NormalMaps(options.Maps)
@@ -78,6 +83,9 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 		uid := options.IDStart + index
 		job := chooseInt(options.Config.Jobs, options.RandIntn)
 		level := env.RandBetween(levels, levelMax)
+		if len(levelPool) > 0 {
+			level = levelPool[robotconfig.LevelPoolIndex(uid, options.Config.RobotUIDStart, len(levelPool))]
+		}
 		info := robotcap.Info{UID: uid, Level: level, Job: job, Port: 0, Village: options.Config.SpawnFallbackVillage, Area: options.Config.SpawnArea, X: options.Config.SpawnXMin, Y: options.Config.SpawnYMin}
 		if options.Config.SpawnFixed {
 			// Fixed spawns are applied again at online time; keep the legacy
@@ -104,9 +112,17 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 		// not set one: the entry level is the dungeon's *lowest*, so writing it
 		// outright dragged a level-90 robot standing at a level-81 gate down to
 		// 82..85. Only a robot drawn below the gate is lifted to it.
-		if dungeonLevel := dungeonLevelOf(options.Maps, info.Village, info.Area); dungeonLevel > 0 {
-			if guardLevel := dungeonLevel + env.RandBetween(1, 4); guardLevel > info.Level {
-				info.Level = guardLevel
+		//
+		// A level plan takes the guard's place. The plan is the operator's word on
+		// the fleet's level composition, and the maps that need it most are gates:
+		// 赫顿玛尔's main town -- the map 凯丽 and 风振 stand on -- carries
+		// DungeonLevel 81, so the guard lifted every level-15..80 robot placed
+		// there to 82..85 and drained the plan's low bands.
+		if len(levelPool) == 0 {
+			if dungeonLevel := dungeonLevelOf(options.Maps, info.Village, info.Area); dungeonLevel > 0 {
+				if guardLevel := dungeonLevel + env.RandBetween(1, 4); guardLevel > info.Level {
+					info.Level = guardLevel
+				}
 			}
 		}
 		// The transfer and the awakening follow the level the robot ended up
@@ -122,6 +138,20 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 		plans = append(plans, ProtocolRobotPlan{Info: info, Request: shared.ProvisionCharacterRequest{AccountName: fmt.Sprintf("%s%d", options.AccountPrefix, uid), PasswordHash: options.PasswordHash, CharacterName: info.Name, Job: job, RobotUID: uid}})
 	}
 	return plans, nil
+}
+
+// buildLevelPool expands the configured level plan into the pool a new robot
+// draws its level from. No plan returns no pool, and the caller keeps the
+// uniform level_min..level_max draw.
+func buildLevelPool(rc robotconfig.RuntimeConfig, draw func(min, max int) int) ([]int, error) {
+	if strings.TrimSpace(rc.LevelPlan) == "" {
+		return nil, nil
+	}
+	bands, err := robotconfig.ParseLevelPlan(rc.LevelPlan)
+	if err != nil {
+		return nil, fmt.Errorf("level_plan: %w", err)
+	}
+	return robotconfig.LevelPool(bands, draw), nil
 }
 
 // dungeonLevelOf returns the entry level of the dungeon the map at village/area

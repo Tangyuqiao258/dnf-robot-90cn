@@ -29,6 +29,11 @@ func validateRuntimeConfig(dec *foundationconfig.Decoder, rc RuntimeConfig) erro
 	checkRange("create", "level_min", rc.LevelMin, 1, 255)
 	checkRange("create", "level_max", rc.LevelMax, 1, 255)
 	checkOrder("create", "level_min", rc.LevelMin, "level_max", rc.LevelMax)
+	if _, err := ParseLevelPlan(rc.LevelPlan); err != nil {
+		dec.Check("create", "level_plan", false, err.Error())
+	}
+	checkRange("create", "pool_size", rc.PoolSize, 0, 1000000)
+	dec.Check("create", "pool_size", rc.PoolSize == 0 || rc.PoolSize <= rc.RobotUIDEnd-rc.RobotUIDStart+1, "must fit inside the robot_uid_start..robot_uid_end range")
 	checkListRange("create", "jobs", rc.Jobs, 0, 255)
 	// grow_types selects the awakening stage: 0 = none, 1 = first, 2 = second.
 	checkListRange("create", "grow_types", rc.GrowTypes, 0, 2)
