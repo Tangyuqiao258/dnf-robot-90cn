@@ -153,6 +153,14 @@ func TestLiveRobotProvisionAndSession(t *testing.T) {
 	}
 	defer applier.Close()
 	applier.LevelThresholds = catalogs.LevelThresholds
+	// The production default keeps a robot's pet on only eighty percent of
+	// character ids -- applyRobotPet gates on a hash of the id so a robot does
+	// not re-roll on every reconcile. This test deletes and re-creates its
+	// character on every run, so the server hands out a fresh id and the hash
+	// is re-rolled with it: the pet assertions below would fail on roughly one
+	// run in five for a reason that has nothing to do with what they check.
+	// Every unit test forces the same value, and for the same reason.
+	applier.Config.PetProbabilityPercent = 100
 	info := robotcap.Info{UID: 17000001, Name: result.CharacterName}
 	leveled, err := applier.InitializeCharacter(ctx, account, info, 70, 0)
 	if err != nil {
