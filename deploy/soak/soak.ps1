@@ -93,8 +93,10 @@ function Get-GuardProcesses {
 
 function Get-LastMetricsLine {
     if (-not (Test-Path $RobotLog)) { return '(no robot.log yet)' }
+    # -match, not -like: in a wildcard pattern [RobotMetrics] is a character
+    # class, so -like would match any line holding one of those letters.
     $line = Get-Content $RobotLog -Tail 400 -ErrorAction SilentlyContinue |
-        Where-Object { $_ -like '*[RobotMetrics]*' } | Select-Object -Last 1
+        Where-Object { $_ -match '\[RobotMetrics\]' } | Select-Object -Last 1
     if (-not $line) { return '(no [RobotMetrics] line in the tail)' }
     return $line
 }
@@ -106,7 +108,7 @@ function Show-OnlineTrend {
     #   online=<a>/<b>  -> stats.OnlineSuccess/OnlineFailed, cumulative counters
     # See internal/scheduler/auto_metrics.go where the line is built.
     $tail = Get-Content $RobotLog -Tail 4000 -ErrorAction SilentlyContinue |
-        Where-Object { $_ -like '*[RobotMetrics]*' }
+        Where-Object { $_ -match '\[RobotMetrics\]' }
     if (-not $tail) { Write-Host '  (no samples)'; return }
     $hist = @{}
     foreach ($line in $tail) {
