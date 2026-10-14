@@ -250,6 +250,38 @@ func TestBuildProtocolRobotPlansLevelsDungeonEntranceRobots(t *testing.T) {
 	}
 }
 
+// TestBuildProtocolRobotPlansNeverLowersAGateRobot covers the other half of the
+// entrance rule. A map's DungeonLevel is the *lowest* entry requirement of the
+// dungeons it opens, so the gate rewrite used to drag a robot drawn above the
+// gate down to just past it -- a level-90 robot at a level-81 gate came out at
+// 82..85, which is how the fleet lost its high-level members. The guard may
+// only raise a level.
+func TestBuildProtocolRobotPlansNeverLowersAGateRobot(t *testing.T) {
+	plans, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
+		Count: 1, IDStart: 17001000, AccountPrefix: "acct",
+		Config: robotconfig.RuntimeConfig{
+			LevelMin: 90, LevelMax: 90, Jobs: []int{0}, GrowTypes: []int{2},
+			SpawnFallbackVillage: 1,
+		},
+		Names: robottemplate.NameTemplates{Common: []string{"Alpha"}},
+		Maps: []shared.MapCatalogItem{{
+			Village: 39, Area: 0, Level: 1, Use: true, DungeonGate: true, DungeonLevel: 81,
+			Rectangles: []shared.MapRectangle{{XMin: 0, XMax: 100, YMin: 0, YMax: 100}},
+		}},
+		JobGrows:    map[int][]int{0: {1}},
+		RandIntn:    func(int) int { return 0 },
+		RandBetween: func(min, max int) int { return max },
+	})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%+v err=%v", plans, err)
+	}
+	// The widest draw of the 1..4 spread still lands at 85, below the level the
+	// robot was drawn with, so the level must survive untouched.
+	if plans[0].Info.Level != 90 {
+		t.Fatalf("level-90 gate robot planned level=%d, want 90", plans[0].Info.Level)
+	}
+}
+
 func TestBuildProtocolRobotPlansKeepsTheDrawnLevelAwayFromDungeons(t *testing.T) {
 	plans, err := BuildProtocolRobotPlans(ProtocolPlanOptions{
 		Count: 1, IDStart: 17001000, AccountPrefix: "acct",

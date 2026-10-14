@@ -100,9 +100,14 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 		}
 		// A robot standing at a dungeon entrance is the crowd a player walks past
 		// on the way in, so it is leveled to the dungeon it guards: a little above
-		// the entry requirement, never below it.
+		// the entry requirement, never below it. The guard raises a level, it does
+		// not set one: the entry level is the dungeon's *lowest*, so writing it
+		// outright dragged a level-90 robot standing at a level-81 gate down to
+		// 82..85. Only a robot drawn below the gate is lifted to it.
 		if dungeonLevel := dungeonLevelOf(options.Maps, info.Village, info.Area); dungeonLevel > 0 {
-			info.Level = dungeonLevel + env.RandBetween(1, 4)
+			if guardLevel := dungeonLevel + env.RandBetween(1, 4); guardLevel > info.Level {
+				info.Level = guardLevel
+			}
 		}
 		// The transfer and the awakening follow the level the robot ended up
 		// with, so an entrance guard is grown like the character its level says
