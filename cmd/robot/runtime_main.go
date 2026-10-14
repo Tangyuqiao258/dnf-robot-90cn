@@ -72,8 +72,9 @@ func runBackend(cfg *config.SysConfig, paths layout.Paths, info shared.BackendIn
 			foundationlog.Robotf("ADAPTER_RUNTIME_CLOSE_FAILED err=%v\n", err)
 		}
 	}()
-	foundationlog.Robotf("ADAPTER_STARTUP_INVENTORY scanned=%d adopted=%d deleted_accounts=%d deleted_characters=%d\n",
-		bundle.Inventory.ScannedAccounts, len(bundle.Inventory.Robots), bundle.Inventory.DeletedAccounts, bundle.Inventory.DeletedCharacters)
+	foundationlog.Robotf("ADAPTER_STARTUP_INVENTORY scanned=%d adopted=%d deleted_accounts=%d deleted_characters=%d swept_characters=%d\n",
+		bundle.Inventory.ScannedAccounts, len(bundle.Inventory.Robots), bundle.Inventory.DeletedAccounts,
+		bundle.Inventory.DeletedCharacters, bundle.Inventory.SweptCharacters)
 	// Do not mark the generation as applied until adapter-specific
 	// initialization (including transport composition and PVF projection) has
 	// succeeded. A failed startup must retry the reinitialization next time.

@@ -63,27 +63,43 @@ func deleteCharacterRows(ctx context.Context, tx *sql.Tx, characterID string) er
 	if err != nil {
 		return err
 	}
+	if err := sweepCharacterChildRows(ctx, tx, existing, characterID); err != nil {
+		return err
+	}
+	if existing[dnfCharactersTable] {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+dnfCharactersTable+` WHERE character_id=?`, characterID); err != nil {
+			return fmt.Errorf("delete 90CN character %s: %w", characterID, err)
+		}
+	}
+	return nil
+}
+
+// sweepCharacterChildRows removes every dependent row of one character but
+// leaves the character row itself. The game server soft-deletes a character:
+// it sets delete_flag and keeps the row, which is all that holds the name, so a
+// row that is still flagged deleted must stay while its data rows go. Tables
+// missing from an older database are skipped.
+func sweepCharacterChildRows(ctx context.Context, tx *sql.Tx, existing map[string]bool, characterID string) error {
+	characterID = strings.TrimSpace(characterID)
+	if characterID == "" {
+		return fmt.Errorf("90CN character id is empty")
+	}
 	for _, table := range dnfCharacterScopedTables {
 		if !existing[table] {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE character_id=?`, characterID); err != nil {
-			return fmt.Errorf("delete 90CN character %s from %s: %w", characterID, table, err)
+			return fmt.Errorf("sweep 90CN character %s from %s: %w", characterID, table, err)
 		}
 	}
 	if existing["dnf_settings"] {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM dnf_settings WHERE scope LIKE ?`, "character:"+characterID+":%"); err != nil {
-			return fmt.Errorf("delete 90CN character %s settings: %w", characterID, err)
+			return fmt.Errorf("sweep 90CN character %s settings: %w", characterID, err)
 		}
 	}
 	if existing["dnf_setting_values"] {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM dnf_setting_values WHERE scope LIKE ?`, "character:"+characterID+":%"); err != nil {
-			return fmt.Errorf("delete 90CN character %s setting values: %w", characterID, err)
-		}
-	}
-	if existing[dnfCharactersTable] {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+dnfCharactersTable+` WHERE character_id=?`, characterID); err != nil {
-			return fmt.Errorf("delete 90CN character %s: %w", characterID, err)
+			return fmt.Errorf("sweep 90CN character %s setting values: %w", characterID, err)
 		}
 	}
 	return nil

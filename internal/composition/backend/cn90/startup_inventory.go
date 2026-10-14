@@ -24,6 +24,7 @@ type StartupInventory struct {
 	ScannedAccounts   int
 	DeletedAccounts   int
 	DeletedCharacters int
+	SweptCharacters   int
 }
 
 type SQLiteStartupInventory struct {
@@ -37,6 +38,12 @@ type startupAccount struct {
 	uid        int
 	name       string
 	characters []startupCharacter
+	// tombstoned holds the ids of the character rows the game server
+	// soft-deleted (delete_flag <> 0). The row itself has to stay -- it is what
+	// the server reserves the name with -- but the rows hanging off it are
+	// garbage, and a soft-deleted character is not a character the account can
+	// be judged by.
+	tombstoned []string
 }
 
 type startupCharacter struct {
@@ -58,10 +65,16 @@ type startupCharacter struct {
 // that is not a complete, usable one-character robot is removed together with
 // its dependent rows.
 //
-// The scan is read-only. Deletion runs in a separate short write transaction
-// that re-verifies each candidate against the recorded character set, so the
-// game server is not blocked behind a full-table scan and no account is
-// deleted when it changed between the scan and the cleanup.
+// Only rows the game server leaves live decide that: a soft-deleted character
+// carries delete_flag and is invisible to the game, so an account holding one
+// live character and one tombstone is a healthy robot account, not an invalid
+// one. Its tombstone keeps the row -- which is what the server reserves the
+// name with -- while the rows hanging off it are swept.
+//
+// The scan is read-only. Deletion and sweeping run in a separate short write
+// transaction that re-verifies each candidate against the recorded character
+// set, so the game server is not blocked behind a full-table scan and no account
+// is deleted when it changed between the scan and the cleanup.
 func (s SQLiteStartupInventory) ScanAndClean(ctx context.Context) (StartupInventory, error) {
 	var result StartupInventory
 	ctx, cancel := context.WithTimeout(ctx, cn90PersistenceTimeout)
@@ -95,6 +108,7 @@ func (s SQLiteStartupInventory) ScanAndClean(ctx context.Context) (StartupInvent
 	}
 	result.ScannedAccounts = len(accounts)
 	invalidAccounts := make([]startupAccount, 0)
+	sweepAccounts := make([]startupAccount, 0)
 	for _, account := range accounts {
 		if len(account.characters) != 1 || !s.characterCompliant(account.characters[0]) {
 			invalidAccounts = append(invalidAccounts, account)
@@ -111,10 +125,13 @@ func (s SQLiteStartupInventory) ScanAndClean(ctx context.Context) (StartupInvent
 		result.Identities = append(result.Identities, robotstate.Identity{
 			Backend: BackendID, Account: account.name, CharacterName: character.name, Slot: &slot,
 		})
+		if len(account.tombstoned) > 0 {
+			sweepAccounts = append(sweepAccounts, account)
+		}
 	}
 
 	// Phase 2: short write transaction.
-	if len(invalidAccounts) > 0 {
+	if len(invalidAccounts) > 0 || len(sweepAccounts) > 0 {
 		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return result, fmt.Errorf("begin 90CN startup inventory: %w", err)
@@ -144,11 +161,17 @@ func (s SQLiteStartupInventory) ScanAndClean(ctx context.Context) (StartupInvent
 				return result, err
 			}
 		}
+		sweptCharacters, err := s.sweepTombstonedCharacters(ctx, tx, sweepAccounts, toDelete)
+		if err != nil {
+			_ = tx.Rollback()
+			return result, err
+		}
 		if err := tx.Commit(); err != nil {
 			return result, fmt.Errorf("commit 90CN startup inventory: %w", err)
 		}
 		result.DeletedAccounts = len(toDelete)
 		result.DeletedCharacters = deletedCharacters
+		result.SweptCharacters = sweptCharacters
 	}
 	sort.Slice(result.Robots, func(i, j int) bool { return result.Robots[i].UID < result.Robots[j].UID })
 	sort.Slice(result.Identities, func(i, j int) bool { return result.Identities[i].Account < result.Identities[j].Account })
@@ -165,8 +188,10 @@ func parseCharacterID(value string) int {
 
 // readOwnedAccounts reads every account that matches the strict robot identity
 // (prefix + numeric UID inside the configured segment) together with its
-// character rows. Accounts without characters are reported as incomplete so
-// the cleanup phase can remove them.
+// character rows. Live and soft-deleted rows are kept apart: only the live ones
+// take part in the compliance decision, and the soft-deleted ids go to the
+// sweep. Accounts without a live character are reported as incomplete so the
+// cleanup phase can remove them.
 func (s SQLiteStartupInventory) readOwnedAccounts(ctx context.Context, conn *sql.Conn, prefix string) ([]startupAccount, error) {
 	byID := make(map[string]*startupAccount)
 	accounts := make([]*startupAccount, 0)
@@ -224,6 +249,10 @@ func (s SQLiteStartupInventory) readOwnedAccounts(ctx context.Context, conn *sql
 		character.name = strings.TrimSpace(name)
 		if parsed, parseErr := strconv.Atoi(strings.TrimSpace(jobText)); parseErr == nil {
 			character.job = parsed
+		}
+		if character.deleteFlag != 0 {
+			account.tombstoned = append(account.tombstoned, character.id)
+			continue
 		}
 		account.characters = append(account.characters, character)
 	}
@@ -303,11 +332,12 @@ func (s SQLiteStartupInventory) verifyInvalidAccounts(ctx context.Context, query
 		if err != nil {
 			return nil, 0, err
 		}
-		if !sameStartupCharacters(account.characters, current) {
+		active, tombstoned := splitTombstoned(current)
+		if !sameStartupCharacters(account.characters, active) || !sameStartupIDs(account.tombstoned, tombstoned) {
 			foundationlog.Robotf("STARTUP_INVENTORY_SKIP_CHANGED account=%s reason=candidate changed during startup scan\n", account.name)
 			continue
 		}
-		if len(current) == 1 && s.characterCompliant(current[0]) {
+		if len(active) == 1 && s.characterCompliant(active[0]) {
 			foundationlog.Robotf("STARTUP_INVENTORY_SKIP_CHANGED account=%s reason=candidate is now compliant\n", account.name)
 			continue
 		}
@@ -315,6 +345,52 @@ func (s SQLiteStartupInventory) verifyInvalidAccounts(ctx context.Context, query
 		deletedCharacters += len(current)
 	}
 	return toDelete, deletedCharacters, nil
+}
+
+// sweepTombstonedCharacters removes the dependent rows of a soft-deleted
+// character and leaves its dnf_characters row, and with it the name, in place.
+// The rows are re-read inside the transaction and a character is swept only
+// while its row is still flagged deleted, so one the game server restored
+// between the scan and the cleanup keeps its data. Accounts that are being
+// removed entirely are skipped: their rows go with them.
+func (s SQLiteStartupInventory) sweepTombstonedCharacters(ctx context.Context, tx *sql.Tx, candidates, deleting []startupAccount) (int, error) {
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	removed := make(map[string]bool, len(deleting))
+	for _, account := range deleting {
+		removed[account.name] = true
+	}
+	existing, err := existingTables(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	swept := 0
+	reported := 0
+	for _, account := range candidates {
+		if removed[account.name] {
+			continue
+		}
+		current, err := readStartupAccountState(ctx, tx, account.name)
+		if err != nil {
+			return 0, err
+		}
+		_, tombstoned := splitTombstoned(current)
+		for _, characterID := range tombstoned {
+			if err := sweepCharacterChildRows(ctx, tx, existing, characterID); err != nil {
+				return 0, err
+			}
+			if reported < startupDeleteLogLimit {
+				foundationlog.Robotf("STARTUP_INVENTORY_SWEEP account=%s character=%s\n", account.name, characterID)
+				reported++
+			}
+			swept++
+		}
+	}
+	if omitted := swept - reported; omitted > 0 {
+		foundationlog.Robotf("STARTUP_INVENTORY_SWEEP_MORE characters=%d\n", omitted)
+	}
+	return swept, nil
 }
 
 func readStartupAccountState(ctx context.Context, queryer startupQueryer, accountID string) ([]startupCharacter, error) {
@@ -345,6 +421,20 @@ func readStartupAccountState(ctx context.Context, queryer startupQueryer, accoun
 	return characters, nil
 }
 
+// splitTombstoned separates the rows the game server soft-deleted from the live
+// ones, keeping each group in the slot order the query returned.
+func splitTombstoned(characters []startupCharacter) (active []startupCharacter, tombstoned []string) {
+	active = make([]startupCharacter, 0, len(characters))
+	for _, character := range characters {
+		if character.deleteFlag != 0 {
+			tombstoned = append(tombstoned, character.id)
+			continue
+		}
+		active = append(active, character)
+	}
+	return active, tombstoned
+}
+
 func sameStartupCharacters(before, after []startupCharacter) bool {
 	if len(before) != len(after) {
 		return false
@@ -355,6 +445,18 @@ func sameStartupCharacters(before, after []startupCharacter) bool {
 			before[index].job != after[index].job ||
 			before[index].grow != after[index].grow ||
 			before[index].deleteFlag != after[index].deleteFlag {
+			return false
+		}
+	}
+	return true
+}
+
+func sameStartupIDs(before, after []string) bool {
+	if len(before) != len(after) {
+		return false
+	}
+	for index := range before {
+		if before[index] != after[index] {
 			return false
 		}
 	}
