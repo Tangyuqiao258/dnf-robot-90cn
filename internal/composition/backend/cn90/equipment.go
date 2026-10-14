@@ -81,7 +81,7 @@ func selectEarring(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeCo
 	best := -1
 	candidates := make([]shared.EquipmentCatalogItem, 0, 8)
 	for _, item := range items {
-		if item.ItemType != 13 || item.ID <= 0 || item.Expire || item.BadName || !shared.ClientCompatibleEquipment(item) {
+		if item.ItemType != 13 || item.ID <= 0 || item.Expire || item.BadName || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
 			continue
 		}
 		if item.Level > level || !equipmentcap.UsableByJob(item.UseJob, job) {

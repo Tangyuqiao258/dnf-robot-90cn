@@ -105,7 +105,7 @@ func cn90AuctionStockPlan(catalog []shared.EquipmentCatalogItem, characterID str
 // item whose attach type mentions an account or character binding can never be
 // listed, so it never enters the pool.
 func cn90AuctionStockTradeable(item shared.EquipmentCatalogItem) bool {
-	if item.ID <= 0 || strings.TrimSpace(item.Path) == "" {
+	if item.ID <= 0 || item.GrantBlocked || strings.TrimSpace(item.Path) == "" {
 		return false
 	}
 	attach := strings.ToLower(strings.TrimSpace(item.Attach))

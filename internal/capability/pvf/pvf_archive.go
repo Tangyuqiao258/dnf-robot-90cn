@@ -247,8 +247,14 @@ func extractItemListFromText(readText func(string) string, listPath, prefix stri
 				if stackable && strings.EqualFold(item.Name, "ErrorString") {
 					item.BadName = true
 				}
+				if shared.ItemNameBlocked(item.Name) {
+					item.GrantBlocked = true
+				}
 			case "[name2]":
 				item.Name2 = cleanPVFString(nextLine(lines, i))
+				if shared.ItemNameBlocked(item.Name2) {
+					item.GrantBlocked = true
+				}
 			case "[rarity]":
 				item.Rarity = atoi(nextLine(lines, i))
 			case "[price]":

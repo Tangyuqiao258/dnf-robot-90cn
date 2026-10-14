@@ -1,5 +1,18 @@
 package shared
 
+import "strings"
+
+// BlockedItemNameFragment is the name fragment of PVF records that exist only
+// as release placeholders: the client renders the name, but the record carries
+// no gameplay data and looks unfinished in a live world. No robot may ever be
+// granted one.
+const BlockedItemNameFragment = "后续确认"
+
+// ItemNameBlocked reports whether a catalog item name is a release placeholder.
+func ItemNameBlocked(name string) bool {
+	return name != "" && strings.Contains(name, BlockedItemNameFragment)
+}
+
 type EquipmentCatalogItem struct {
 	ID            int    `json:"id"`
 	Name          string `json:"name,omitempty"`
@@ -39,6 +52,12 @@ type EquipmentCatalogItem struct {
 	// ClientIncompatible marks an item whose script uses fields that this DP2
 	// client cannot parse safely. Every generated-item consumer must reject it.
 	ClientIncompatible bool `json:"client_incompatible,omitempty"`
+
+	// GrantBlocked marks an item that no robot may ever be granted, whatever
+	// the consumer (worn gear, avatar, pet, bag stock, auction purchase).
+	// The catalog projection derives it from the name once so consumers pay a
+	// bool check instead of rescanning every name. See ItemNameBlocked.
+	GrantBlocked bool `json:"grant_blocked,omitempty"`
 }
 
 // ClientCompatibleEquipment reports whether generated equipment may be sent

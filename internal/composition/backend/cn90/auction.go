@@ -298,12 +298,13 @@ func (t *ActionTransport) auctionCatalog() []shared.EquipmentCatalogItem {
 	return t.stackables
 }
 
-// stackableIndex maps the stocked catalog by item id.
+// stackableIndex maps the stocked catalog by item id. Blocked placeholder
+// records stay out of the index so the buy gate never picks a listing of one.
 func (t *ActionTransport) stackableIndex() map[int]shared.EquipmentCatalogItem {
 	catalog := t.auctionCatalog()
 	index := make(map[int]shared.EquipmentCatalogItem, len(catalog))
 	for _, item := range catalog {
-		if item.ID > 0 {
+		if item.ID > 0 && !item.GrantBlocked {
 			index[item.ID] = item
 		}
 	}

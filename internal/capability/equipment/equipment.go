@@ -167,7 +167,7 @@ func FilterAvatarSupportedJobs(jobs []int, items []shared.EquipmentCatalogItem, 
 	}
 	eligible := make([]shared.EquipmentCatalogItem, 0)
 	for _, item := range items {
-		if item.ID == 0 || item.Expire || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
+		if item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
 			continue
 		}
 		if _, ok := wantedTypes[item.ItemType]; ok {
@@ -285,7 +285,7 @@ func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job int, rc
 	}
 	for _, item := range items {
 		slot, wanted := slotByItemType[item.ItemType]
-		if !wanted || item.ID == 0 || item.Expire || !shared.ClientCompatibleEquipment(item) || item.Level > level {
+		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > level {
 			continue
 		}
 		if rc.EquipRarityMax > 0 && (item.Rarity < rc.EquipRarityMin || item.Rarity > rc.EquipRarityMax) {
@@ -337,7 +337,7 @@ func PrepareAvatarCatalog(items []shared.EquipmentCatalogItem, rc robotconfig.Ru
 	}
 	for _, item := range items {
 		slot, wanted := slotByType[item.ItemType]
-		if !wanted || item.ID == 0 || item.Expire || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
+		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || !AvatarRenderable(item) {
 			continue
 		}
 		for job := 0; job <= 8; job++ {
@@ -415,7 +415,7 @@ func SelectPet(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig
 		}
 	}
 	for _, item := range items {
-		if item.ID <= 0 || item.Expire || !shared.ClientCompatibleEquipment(item) {
+		if item.ID <= 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
 			continue
 		}
 		switch item.ItemType {
@@ -473,7 +473,7 @@ func SelectPet(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig
 // Those records have ErrorString names or stackable icons and are not
 // loadable by the game creature manager as equipped artifacts.
 func PetArtifactRenderable(item shared.EquipmentCatalogItem) bool {
-	if item.ID <= 0 || item.Expire || !shared.ClientCompatibleEquipment(item) {
+	if item.ID <= 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
 		return false
 	}
 	if item.ItemType < 31 || item.ItemType > 33 {
@@ -574,7 +574,7 @@ func configuredEquipmentSlot(slots []int, wanted int) bool {
 }
 
 func equipmentCandidate(item shared.EquipmentCatalogItem, slot, level, job int, rc robotconfig.RuntimeConfig) bool {
-	if item.ID <= 0 || item.ItemType != slot || item.Expire || !shared.ClientCompatibleEquipment(item) || item.Level > level || !UsableByJob(item.UseJob, job) {
+	if item.ID <= 0 || item.ItemType != slot || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > level || !UsableByJob(item.UseJob, job) {
 		return false
 	}
 	return rc.EquipRarityMax <= 0 || item.Rarity >= rc.EquipRarityMin && item.Rarity <= rc.EquipRarityMax
