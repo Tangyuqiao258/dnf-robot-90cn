@@ -8,6 +8,10 @@ import (
 	"robot/internal/shared"
 )
 
+// everyArmorMaterial is what an untransferred character may wear, in the order
+// ArmorMaterialsFor answers with.
+var everyArmorMaterial = []string{ArmorCloth, ArmorLeather, ArmorLight, ArmorHeavy, ArmorPlate}
+
 func TestArmorMaterialsForReadsTheTransferBranch(t *testing.T) {
 	cases := []struct {
 		job, grow int
@@ -36,9 +40,12 @@ func TestArmorMaterialsForReadsTheTransferBranch(t *testing.T) {
 		// 守护者 is where the archive order and the usual class listing differ:
 		// 帕拉丁 is branch 3 and 龙骑士 branch 4.
 		{job: 12, grow: 0x03, want: []string{ArmorPlate}},
-		// A robot that never transferred wears anything.
-		{job: 0, grow: 0, want: nil},
-		{job: 2, grow: 0, want: nil},
+		// A robot that never transferred wears anything: the server's character
+		// template gives it 基础防具精通 alone, which covers all five materials.
+		{job: 0, grow: 0, want: everyArmorMaterial},
+		{job: 2, grow: 0, want: everyArmorMaterial},
+		{job: 3, grow: 0, want: everyArmorMaterial},
+		{job: 99, grow: 0, want: everyArmorMaterial},
 		// 黑暗武士 masters four of the five materials and never transfers;
 		// 缔造者 masters plate and never transfers.
 		{job: 9, grow: 0, want: []string{ArmorCloth, ArmorLight, ArmorHeavy, ArmorPlate}},
@@ -81,6 +88,25 @@ func TestDarkKnightArmorExcludesLeather(t *testing.T) {
 	}
 }
 
+// TestUntransferredStillRequiresAMaterial pins the branch-0 answer to a real
+// material set: an untransferred robot may wear any of the five materials, but a
+// coat record filed outside the material directories is not armor and stays out,
+// so the set can never quietly degrade back into "no filter at all".
+func TestUntransferredStillRequiresAMaterial(t *testing.T) {
+	rc := robotconfig.Default()
+	rc.EquipSlots = []int{3}
+	rc.PreferEquipSets = false
+	// equipment/character/common/etc holds ten records the catalog classifies as
+	// coat or waist although no material directory backs them.
+	items := []shared.EquipmentCatalogItem{
+		{ID: 1, ItemType: 3, Level: 50, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/etc/bravery.equ"},
+	}
+	selected := SelectEquipment(items, 50, 3, 0, rc, func(int) int { return 0 })
+	if selected[3].ID != 0 {
+		t.Fatalf("untransferred coat = %+v, want no item", selected[3])
+	}
+}
+
 func TestArmorMasteryTableIsWellFormed(t *testing.T) {
 	for job, branches := range jobArmorMastery {
 		seen := make(map[int]bool, len(branches))
@@ -100,15 +126,28 @@ func TestArmorMasteryTableIsWellFormed(t *testing.T) {
 			}
 		}
 	}
-	for job, materials := range fixedJobArmorMaterials {
+	for job, materials := range baseJobArmorMaterials {
 		if len(materials) == 0 {
-			t.Errorf("job %d lists no fixed material, which would leave it unrestricted", job)
+			t.Errorf("job %d lists no base material, which would leave it unrestricted", job)
 		}
 		for _, material := range materials {
 			if !isArmorMaterial(material) {
-				t.Errorf("job %d fixed material %q is not a PVF material directory", job, material)
+				t.Errorf("job %d base material %q is not a PVF material directory", job, material)
 			}
 		}
+	}
+	if len(allArmorMaterials) != 5 {
+		t.Errorf("allArmorMaterials = %q, want the archive's five material directories", allArmorMaterials)
+	}
+	seenMaterial := make(map[string]bool, len(allArmorMaterials))
+	for _, material := range allArmorMaterials {
+		if !isArmorMaterial(material) {
+			t.Errorf("material %q is not a PVF material directory", material)
+		}
+		if seenMaterial[material] {
+			t.Errorf("material %q is listed twice", material)
+		}
+		seenMaterial[material] = true
 	}
 }
 

@@ -44,7 +44,7 @@ func equipmentTestCatalog() []shared.EquipmentCatalogItem {
 		{ID: 103, Name: "护肩", Path: "equipment/character/common/shoulder/larmor/103.equ", ItemType: 4, Level: 60, Rarity: 3, Durability: 20},
 		{ID: 104, Name: "下装", Path: "equipment/character/common/pants/cloth/104.equ", ItemType: 5, Level: 60, Rarity: 3, Durability: 25},
 		{ID: 105, Name: "鞋子", Path: "equipment/character/common/shoes/cloth/105.equ", ItemType: 6, Level: 60, Rarity: 3, Durability: 20},
-		{ID: 106, Name: "腰带", Path: "equipment/character/common/belt/106.equ", ItemType: 7, Level: 60, Rarity: 3, Durability: 15},
+		{ID: 106, Name: "腰带", Path: "equipment/character/common/belt/harmor/106.equ", ItemType: 7, Level: 60, Rarity: 3, Durability: 15},
 		{ID: 107, Name: "项链", Path: "equipment/character/common/amulet/107.equ", ItemType: 8, Level: 60, Rarity: 3, Durability: 15},
 		{ID: 108, Name: "手镯", Path: "equipment/character/common/wrist/108.equ", ItemType: 9, Level: 60, Rarity: 3, Durability: 15},
 		{ID: 109, Name: "戒指", Path: "equipment/character/common/ring/109.equ", ItemType: 10, Level: 60, Rarity: 3, Durability: 15},

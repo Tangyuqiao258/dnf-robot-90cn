@@ -146,25 +146,42 @@ var jobArmorMastery = map[int][]ArmorMasteryBranch{
 	},
 }
 
-// fixedJobArmorMaterials covers the jobs the archive gives no transfer branch,
-// so the grow nibble is always 0. Its value is the set of materials the class
-// masters: 黑暗武士 masters four of the five and is the reason this is a set
-// rather than the single material a transfer branch carries; 缔造者 masters one.
-var fixedJobArmorMaterials = map[int][]string{
-	9:  {ArmorCloth, ArmorLight, ArmorHeavy, ArmorPlate}, // 黑暗武士: no leather
+// allArmorMaterials is every material directory the archive carries, in the
+// order the tables below are written.
+var allArmorMaterials = []string{ArmorCloth, ArmorLeather, ArmorLight, ArmorHeavy, ArmorPlate}
+
+// baseJobArmorMaterials covers the two jobs the archive gives no transfer
+// branch, whose own character template names armor masteries: 黑暗武士 masters
+// four of the five materials, 缔造者 masters plate alone. They are the reason a
+// base class is a set of materials rather than the single material a transfer
+// branch carries.
+//
+// Every other class's template names no mastery of its own, and the game server
+// creates such a character with 基础防具精通 (ArmorMasteryEtc, skill id 511)
+// alone — a file that is byte-identical across all sixteen class directories,
+// covers all five materials and is enabled at every branch. An untransferred
+// character therefore wears any material, which ArmorMaterialsFor answers with
+// allArmorMaterials. The armor-mastery archive check reads
+// character/<class>.chr's first [skill] block, the template the server builds a
+// new character from, and holds this table to it.
+var baseJobArmorMaterials = map[int][]string{
+	9:  {ArmorCloth, ArmorLight, ArmorHeavy, ArmorPlate}, // 黑暗武士: 皮甲精通 sits under NotApplicable
 	10: {ArmorPlate},                                     // 缔造者
 }
 
 // ArmorMaterialsFor returns the armor materials the character behind job/grow
 // may wear, or nil when nothing restricts it. grow_type packs the awakening
 // stage in the high nibble and the transfer branch in the low one, so the
-// branch is the low nibble. A robot whose branch this table does not know is
-// left unrestricted: a table that is missing an entry must widen the catalog,
-// never silently empty it.
+// branch is the low nibble. A branch the table does not know is left
+// unrestricted: a table that is missing an entry must widen the catalog, never
+// silently empty it.
 func ArmorMaterialsFor(job, grow int) []string {
 	branch := grow & 0x0f
 	if branch == 0 {
-		return fixedJobArmorMaterials[job]
+		if materials, ok := baseJobArmorMaterials[job]; ok {
+			return materials
+		}
+		return append([]string(nil), allArmorMaterials...)
 	}
 	for _, mastery := range jobArmorMastery[job] {
 		if mastery.Branch == branch {

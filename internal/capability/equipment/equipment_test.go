@@ -36,6 +36,40 @@ func TestBestEquipmentLevelsMirrorsSelectionFilters(t *testing.T) {
 	}
 }
 
+// TestArmorSlotsFallBackToTheArchivesOwnRarity pins the fallback the fleet's
+// 重甲 and 板甲 branches depend on. The band's rarity wins wherever the archive can
+// pay for it, an armor slot the band cannot fill takes the best rarity the archive
+// does hold, and a slot that is not armor stays empty rather than borrowing the
+// rule. 勇者 is the one rarity the fallback must never reach: it is the 异界 set.
+func TestArmorSlotsFallBackToTheArchivesOwnRarity(t *testing.T) {
+	rc := robotconfig.Default()
+	rc.EquipSlots = []int{1, 3, 4, 8}
+	rc.PreferEquipSets = false
+	// Level 60 sits in the 36..70 band, whose gear is 神器 (rarity 3).
+	items := []shared.EquipmentCatalogItem{
+		{ID: 1, ItemType: 8, Level: 60, Rarity: 4, UseJob: []int{100}, Path: "equipment/character/common/amulet/1.equ"},
+		{ID: 2, ItemType: 3, Level: 60, Rarity: 4, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/2.equ"},
+		{ID: 3, ItemType: 3, Level: 60, Rarity: 6, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/3.equ"},
+		{ID: 4, ItemType: 4, Level: 60, Rarity: 5, UseJob: []int{100}, Path: "equipment/character/common/shoulder/cloth/4.equ"},
+	}
+	worn := SelectEquipment(items, 60, 1, 0, rc, func(int) int { return 0 })
+	if got := worn[3].ID; got != 2 {
+		t.Fatalf("coat = %d, want the 史诗 record 2: the band's 神器 is absent and 史诗 outranks 传说", got)
+	}
+	if item, ok := worn[8]; ok {
+		t.Fatalf("amulet = %d, want none: an accessory sits out an empty band rather than falling back", item.ID)
+	}
+	if item, ok := worn[4]; ok {
+		t.Fatalf("shoulder = %d, want none: 勇者 is never worn, whatever is missing", item.ID)
+	}
+	// The band's own rarity wins wherever the archive holds it.
+	items = append(items, shared.EquipmentCatalogItem{ID: 5, ItemType: 3, Level: 60, Rarity: 3, UseJob: []int{100}, Path: "equipment/character/common/jacket/cloth/5.equ"})
+	worn = SelectEquipment(items, 60, 1, 0, rc, func(int) int { return 0 })
+	if got := worn[3].ID; got != 5 {
+		t.Fatalf("coat = %d, want the 神器 record 5", got)
+	}
+}
+
 func TestBuildCreatureSlotsUsesActiveCreatureRecord(t *testing.T) {
 	const itemID = 63050
 	raw := buildCreatureSlots(itemID, nil)

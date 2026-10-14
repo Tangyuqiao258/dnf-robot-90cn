@@ -16,10 +16,11 @@ import (
 // TestZZProbeFleetGrowth reports the live fleet's job and grow distribution and
 // audits every live character's worn set against the rules the selector applies.
 // It answers the questions the operator's report raises: the armor-material
-// filter keys off the transfer branch in the low nibble of grow_type and
-// ArmorMaterialsFor returns nil -- no restriction at all -- when a job has no
-// fixed-material entry at branch 0, so whether that leaves anyone unrestricted
-// depends on who actually sits at branch 0, which only the database can say.
+// filter keys off the transfer branch in the low nibble of grow_type, and
+// ArmorMaterialsFor answers for branch 0 with the job's own base template (all
+// five materials for a class whose template names 基础防具精通 alone, 板甲 alone for
+// 缔造者, four materials for 黑暗武士), so whether the live fleet's branch-0
+// characters match that answer is what the database is asked to say.
 //
 // Enable with CN90_PROBE_FLEET=1.
 func TestZZProbeFleetGrowth(t *testing.T) {
@@ -154,7 +155,9 @@ func TestZZProbeFleetGrowth(t *testing.T) {
 		materials := equipmentcap.ArmorMaterialsFor(r.job, r.grow)
 		note := ""
 		if len(materials) == 0 {
-			note = "  <-- UNRESTRICTED"
+			// Only a branch the table does not know answers with nothing, which
+			// the selector reads as "no restriction".
+			note = "  <-- UNRESTRICTED (unknown branch)"
 		}
 		say("%s -> %v%s\n", key, materials, note)
 	}
@@ -241,7 +244,7 @@ func TestZZProbeFleetGrowth(t *testing.T) {
 		totals.total, totals.jobBad, totals.materialBad, totals.rarity5, totals.blocked, totals.unknown)
 
 	say("\nloadout markers among live characters:\n")
-	markerRows, err := db.Query(`SELECT extra_value, COUNT(*) FROM ` + dnfEquipmentExtraTable +
+	markerRows, err := db.Query(`SELECT extra_value, COUNT(*) FROM `+dnfEquipmentExtraTable+
 		` WHERE extra_key=? GROUP BY extra_value ORDER BY extra_value`, cn90LoadoutMarkerKey)
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +318,7 @@ func TestZZProbeTombstones(t *testing.T) {
 	say("page_count=%d page_size=%d freelist=%d  (free bytes=%d)\n", pageCount, pageSize, freelist, freelist*pageSize)
 
 	var total, deleted int
-	if err := db.QueryRow(`SELECT COUNT(*), SUM(CASE WHEN delete_flag<>0 THEN 1 ELSE 0 END) FROM ` + dnfCharactersTable).Scan(&total, &deleted); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*), SUM(CASE WHEN delete_flag<>0 THEN 1 ELSE 0 END) FROM `+dnfCharactersTable).Scan(&total, &deleted); err != nil {
 		t.Fatal(err)
 	}
 	say("\ncharacters total=%d deleted=%d live=%d\n", total, deleted, total-deleted)

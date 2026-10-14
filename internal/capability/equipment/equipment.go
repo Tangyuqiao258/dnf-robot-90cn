@@ -273,7 +273,9 @@ func BestEquipmentLevels(items []shared.EquipmentCatalogItem, level, job, grow i
 // The level and rarity the pool is drawn from come from the character's level
 // band, not from the equipment config: the operator states one rarity per band,
 // and a band's rarity is a single value rather than a range, so the retired
-// equip_rarity_min/max keys no longer decide what a robot wears.
+// equip_rarity_min/max keys no longer decide what a robot wears. An armor slot
+// the band's rarity has nothing for drops to armorFallbackRarities; a slot of
+// any other kind simply goes unfilled.
 func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow int, rc robotconfig.RuntimeConfig) (map[int][]shared.EquipmentCatalogItem, map[int]int) {
 	slots := rc.EquipSlots
 	if len(slots) == 0 {
@@ -290,23 +292,21 @@ func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow i
 	materials := ArmorMaterialsFor(job, grow)
 	gearLevel := EquipLevelFor(level)
 	rarity := BandRarityFor(level)
-	candidatesBySlot := make(map[int][]shared.EquipmentCatalogItem, len(slots))
 	slotByItemType := make(map[int]int, len(slots))
-	bestLevelBySlot := make(map[int]int, len(slots))
 	for _, slot := range slots {
 		itemType := WornItemTypeOfSlot(slot)
 		if itemType == 0 {
 			continue
 		}
 		slotByItemType[itemType] = slot
-		candidatesBySlot[slot] = nil
 	}
+	// Every rarity the pool holds is kept apart rather than filtered down to the
+	// band's own, so an armor slot that the band cannot fill falls back without a
+	// second walk over the catalog. See armorFallbackRarities.
+	poolBySlot := make(map[int]map[int][]shared.EquipmentCatalogItem, len(slots))
 	for _, item := range items {
 		slot, wanted := slotByItemType[item.ItemType]
 		if !wanted || item.ID == 0 || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > gearLevel {
-			continue
-		}
-		if item.Rarity != rarity {
 			continue
 		}
 		if !UsableByJob(item.UseJob, job) {
@@ -318,10 +318,37 @@ func equipmentCandidates(items []shared.EquipmentCatalogItem, level, job, grow i
 		if !weaponAllowed(item, job, grow) {
 			continue
 		}
-		if item.Level > bestLevelBySlot[slot] {
-			bestLevelBySlot[slot] = item.Level
+		if poolBySlot[slot] == nil {
+			poolBySlot[slot] = make(map[int][]shared.EquipmentCatalogItem, 2)
 		}
-		candidatesBySlot[slot] = append(candidatesBySlot[slot], item)
+		poolBySlot[slot][item.Rarity] = append(poolBySlot[slot][item.Rarity], item)
+	}
+	candidatesBySlot := make(map[int][]shared.EquipmentCatalogItem, len(slots))
+	bestLevelBySlot := make(map[int]int, len(slots))
+	for _, slot := range slots {
+		itemType := WornItemTypeOfSlot(slot)
+		if itemType == 0 {
+			continue
+		}
+		pool := poolBySlot[slot]
+		candidates := pool[rarity]
+		if len(candidates) == 0 && itemType >= firstArmorItemType && itemType <= lastArmorItemType {
+			for _, fallback := range armorFallbackRarities {
+				if len(pool[fallback]) > 0 {
+					candidates = pool[fallback]
+					break
+				}
+			}
+		}
+		if len(candidates) == 0 {
+			continue
+		}
+		candidatesBySlot[slot] = candidates
+		for _, item := range candidates {
+			if item.Level > bestLevelBySlot[slot] {
+				bestLevelBySlot[slot] = item.Level
+			}
+		}
 	}
 	return candidatesBySlot, bestLevelBySlot
 }

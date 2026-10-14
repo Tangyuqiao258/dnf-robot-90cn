@@ -62,6 +62,24 @@ var equipmentBands = []EquipmentBand{
 	{MaxLevel: 0, Rarity: RarityEpic, UpgradeMin: 9, UpgradeMax: 13, Amplified: true},
 }
 
+// armorFallbackRarities is the order an armor slot falls back through when the
+// character's band rarity has nothing to offer it, best first in the operator's
+// quality order.
+//
+// A band states how a robot of that level should look, and the selector honors
+// it wherever the archive can pay for it. Where the archive cannot, an empty
+// slot is the worst outcome, and the archive cannot for exactly the band the
+// fleet lives in: a census of the clean armor records below level 70 — unblocked,
+// unexpired, client-parseable — finds nine 神器 布甲, nine 轻甲, six 皮甲, and no
+// 重甲 or 板甲 at all, so without a fallback nineteen of the twenty mastery
+// branches (every 重甲 and 板甲 one) would dress no armor at any level from 36 to
+// 70. The same archive holds 41 重甲 and 14 板甲 史诗 records at those levels and
+// 21 传说 records per material, which is where the slot lands instead.
+//
+// 勇者 is absent on purpose: it is the 异界 set and no robot may wear it, however
+// thin the band's own pool turns out to be.
+var armorFallbackRarities = []int{RarityEpic, RarityLegendary, RarityRare, RarityUncommon, RarityCommon}
+
 // EquipmentBandFor returns the band a character of this level wears. A level
 // below the first band's ceiling still lands in a band, and a negative level
 // falls into the first one rather than out of the table.
