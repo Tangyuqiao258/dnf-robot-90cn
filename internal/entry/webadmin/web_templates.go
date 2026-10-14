@@ -24,6 +24,12 @@ var appCSS string
 //go:embed assets/i18n.js
 var i18nJS string
 
+// The script and style assets are inlined into the page *before* it is handed
+// to html/template, and that parser drops comments from the script and style
+// contexts. An asset carrying a comment therefore does not reach the browser
+// the way it reads on disk. Keep assets/app.js and assets/i18n.js free of
+// comments; TestIndexTemplateInlinesEmbeddedAssets fails if one creeps back in.
+//
 //go:embed assets/app.js
 var appJS string
 

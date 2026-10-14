@@ -77,9 +77,17 @@ func TestIndexTemplateInlinesEmbeddedAssets(t *testing.T) {
 			t.Errorf("rendered index contains %q", placeholder)
 		}
 	}
-	for _, asset := range []string{trimAssetTerminator(appCSS), trimAssetTerminator(i18nJS), trimAssetTerminator(appJS)} {
-		if !strings.Contains(page, asset) {
-			t.Fatal("rendered index is missing an embedded asset")
+	// A comment added to one of these assets is the usual cause of a failure
+	// here: html/template parses the page after the assets are inlined and
+	// drops comments from the script and style contexts, so the rendered page
+	// stops containing the asset verbatim.
+	for _, asset := range []struct{ name, content string }{
+		{"assets/app.css", trimAssetTerminator(appCSS)},
+		{"assets/i18n.js", trimAssetTerminator(i18nJS)},
+		{"assets/app.js", trimAssetTerminator(appJS)},
+	} {
+		if !strings.Contains(page, asset.content) {
+			t.Fatalf("rendered index is missing embedded %s (does it carry a comment?)", asset.name)
 		}
 	}
 }
