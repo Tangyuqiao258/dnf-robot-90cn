@@ -16,6 +16,18 @@ func Default() RuntimeConfig {
 		PreferEquipSets: true, EquipSetMinSlots: 5,
 		AvatarSlots: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, MinAvatarSlots: 8, PreferAvatarSets: true, AvatarSetMinSlots: 6,
 		PetEnabled: true, PetProbabilityPercent: 80, PetArtifactEnabled: true, PetArtifactSlots: []int{31, 32, 33}, MinPetArtifactSlots: 1, MaxPetArtifactSlots: 2,
+		// Titles stay off: the client animates a title's icon, so the fleet pays
+		// for it every time one is on screen. The two ids are the reference
+		// server's 兽人守护神 (400330105) and 天选之人 (400330106), both universal
+		// level-1 titles from equipment/character/common/title.
+		TitleEnabled: false, TitleItem: 400330105, TitleTopItem: 400330106, TitleTopLevel: 90,
+		// Black Diamond is on: it is an account-level date the server stores, so
+		// unlike a title nothing about it reaches the client's renderer. The ten
+		// year term is not the shop's 30 days -- a robot has no cera to renew
+		// with and no operator to renew it, so the fleet is granted a term it
+		// cannot outlive. Renewal is monotonic, so this value can only ever be
+		// reached, never shortened.
+		BlackDiamondEnabled: true, BlackDiamondDays: 3650,
 		StoreEquipmentStartBox: 7, StoreMaterialStartBox: 105, StoreEquipmentIntensifyMin: 7, StoreEquipmentIntensifyMax: 13,
 		StoreEquipmentPriceMin: 500000, StoreEquipmentPriceMax: 1000000, StoreMaterialPriceMin: 10, StoreMaterialPriceMax: 50,
 		StoreEquipmentLevelWeight: 35, StoreEquipmentRarityWeight: 40, StoreEquipmentIntensifyWeight: 25,
@@ -71,6 +83,8 @@ func Normalize(rc *RuntimeConfig) {
 	normalizeEquipmentDefaults(rc)
 	normalizeAvatarDefaults(rc)
 	normalizePetDefaults(rc)
+	normalizeTitleDefaults(rc)
+	normalizePremiumDefaults(rc)
 	normalizeAutoSchedule(rc)
 	normalizeServerNotice(rc)
 	normalizeGamePortProbe(rc)
@@ -248,6 +262,29 @@ func normalizeAvatarDefaults(rc *RuntimeConfig) {
 	}
 	if rc.PreferAvatarSets && len(rc.AvatarSlots) > 0 && rc.AvatarSetMinSlots > len(rc.AvatarSlots) {
 		rc.AvatarSetMinSlots = len(rc.AvatarSlots)
+	}
+}
+
+func normalizeTitleDefaults(rc *RuntimeConfig) {
+	// An id of zero names no item, so it cannot pin anything. Fall back to the
+	// reference server's pair rather than leaving the fleet bare.
+	if rc.TitleItem <= 0 {
+		rc.TitleItem = 400330105
+	}
+	if rc.TitleTopItem <= 0 {
+		rc.TitleTopItem = 400330106
+	}
+	if rc.TitleTopLevel < 1 {
+		rc.TitleTopLevel = 90
+	}
+}
+
+func normalizePremiumDefaults(rc *RuntimeConfig) {
+	// A term of zero would grant nothing, and the only way to reach it is an
+	// operator writing it, so fall back to the built-in term rather than let the
+	// fleet's membership silently lapse.
+	if rc.BlackDiamondDays <= 0 {
+		rc.BlackDiamondDays = 3650
 	}
 }
 

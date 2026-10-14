@@ -253,6 +253,11 @@ func SelectEquipment(items []shared.EquipmentCatalogItem, level int, job, grow i
 		selected = SelectSetItems(candidatesBySlot, rc.EquipSetMinSlots, randIntn)
 	}
 	FillRandomItems(selected, candidatesBySlot, randIntn)
+	// Pinned after the draw so it survives both the set pick and the fill. The
+	// title is not part of the candidate pool: it is named, not chosen.
+	if item, ok := pinnedTitle(level, rc, items); ok {
+		selected[titleSlot] = item
+	}
 	return selected
 }
 
@@ -537,10 +542,7 @@ func BuildEquipmentSlots(items []shared.EquipmentCatalogItem, level int, job, gr
 }
 
 func EquipmentSlotsNeedRepair(raw []byte, itemsByID map[int]shared.EquipmentCatalogItem, level, job, grow int, rc robotconfig.RuntimeConfig) bool {
-	slots := rc.EquipSlots
-	if len(slots) == 0 {
-		slots = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
-	}
+	slots := equipSlotsFor(level, rc)
 	required := make(map[int]bool, len(slots))
 	for _, item := range itemsByID {
 		if equipmentCandidate(item, item.ItemType, level, job, grow, rc) && configuredEquipmentSlot(slots, item.ItemType) {
@@ -592,7 +594,20 @@ func configuredEquipmentSlot(slots []int, wanted int) bool {
 }
 
 func equipmentCandidate(item shared.EquipmentCatalogItem, slot, level, job, grow int, rc robotconfig.RuntimeConfig) bool {
-	if item.ID <= 0 || item.ItemType != slot || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) || item.Level > level || !UsableByJob(item.UseJob, job) {
+	if item.ID <= 0 || item.ItemType != slot || item.Expire || item.GrantBlocked || !shared.ClientCompatibleEquipment(item) {
+		return false
+	}
+	if slot == titleSlot {
+		if id := PinnedTitleItem(level, rc); id > 0 {
+			// Pinned, not drawn, so the job sweep and the rarity band must not
+			// second-guess it: the operator named this item. 天选之人 is a
+			// rarity-6 title and the fleet's band tops out at 5.
+			return item.ID == id
+		}
+		// No pin: slot 2 behaves like any other, so an operator who lists it in
+		// equip_slots keeps the random draw and its band.
+	}
+	if item.Level > level || !UsableByJob(item.UseJob, job) {
 		return false
 	}
 	if !armorAllowed(item, ArmorMaterialsFor(job, grow)) {

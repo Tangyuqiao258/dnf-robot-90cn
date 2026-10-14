@@ -51,6 +51,35 @@ type RuntimeConfig struct {
 	PetArtifactSlots         []int  `json:"pet_artifact_slots"`
 	MinPetArtifactSlots      int    `json:"min_pet_artifact_slots"`
 	MaxPetArtifactSlots      int    `json:"max_pet_artifact_slots"`
+	// Titles (称号). A title is the one piece of equipment whose icon the client
+	// animates, so a fleet wearing one costs every nearby client more to render
+	// than the same fleet wearing none. That cost is why this is a switch of its
+	// own rather than another entry in EquipSlots, and why it defaults to off.
+	//
+	// The items are pinned by id rather than drawn from the catalog: the
+	// operator names the title the whole fleet wears and the one a robot at or
+	// above TitleTopLevel wears instead. The pin is deliberate -- a title says
+	// something about who is wearing it, and a random draw out of the archive's
+	// thousands would not.
+	TitleEnabled  bool `json:"title_enabled"`
+	TitleItem     int  `json:"title_item"`
+	TitleTopItem  int  `json:"title_top_item"`
+	TitleTopLevel int  `json:"title_top_level"`
+	// Premium contracts (契约/会员). These are the account-level entitlements the
+	// game server keeps as an absolute expiry per premium type in the account
+	// metadata table, so the fleet is granted a date rather than an item.
+	//
+	// Black Diamond (type 56) is the one the operator asked for: it is what
+	// raises a character's daily fatigue allowance and its dungeon exp rate, and
+	// the client marks the character in the scene from the same flag. Unlike a
+	// title it costs a client nothing to render, so it defaults to on.
+	//
+	// The term is deliberately long because the grant is a date, not a
+	// subscription: the reconcile extends an expiry monotonically, so a shorter
+	// term would only mean the fleet is renewed more often, never that the
+	// membership ends sooner.
+	BlackDiamondEnabled bool `json:"black_diamond_enabled"`
+	BlackDiamondDays    int  `json:"black_diamond_days"`
 	// Auction house (拍卖行) behavior. The stock stage seeds each robot
 	// character's bag with tradeable material stacks and a gold floor before the
 	// robot logs in: the server's register gate reads the listed item from the

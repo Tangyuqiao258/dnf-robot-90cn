@@ -94,6 +94,14 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.MinPetArtifactSlots = dec.Int("pet", "min_pet_artifact_slots", rc.MinPetArtifactSlots)
 	rc.MaxPetArtifactSlots = dec.Int("pet", "max_pet_artifact_slots", rc.MaxPetArtifactSlots)
 
+	rc.TitleEnabled = dec.Bool("title", "title_enabled", rc.TitleEnabled)
+	rc.TitleItem = dec.Int("title", "title_item", rc.TitleItem)
+	rc.TitleTopItem = dec.Int("title", "title_top_item", rc.TitleTopItem)
+	rc.TitleTopLevel = dec.Int("title", "title_top_level", rc.TitleTopLevel)
+
+	rc.BlackDiamondEnabled = dec.Bool("premium", "black_diamond_enabled", rc.BlackDiamondEnabled)
+	rc.BlackDiamondDays = dec.Int("premium", "black_diamond_days", rc.BlackDiamondDays)
+
 	rc.AuctionEnabled = dec.Bool("auction", "auction_enabled", rc.AuctionEnabled)
 	rc.AuctionStockStacks = dec.Int("auction", "auction_stock_stacks", rc.AuctionStockStacks)
 	rc.AuctionStockGold = dec.Int("auction", "auction_stock_gold", rc.AuctionStockGold)

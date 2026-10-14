@@ -69,6 +69,16 @@ pet_artifact_slots = 31,33
 min_pet_artifact_slots = 1
 max_pet_artifact_slots = 1
 
+[title]
+title_enabled = true
+title_item = 400330105
+title_top_item = 400330106
+title_top_level = 85
+
+[premium]
+black_diamond_enabled = false
+black_diamond_days = 999
+
 [store]
 store_equipment_price_min = 1000
 store_equipment_price_max = 2000
@@ -144,6 +154,12 @@ packet_rate_per_sec = 30
 	}
 	if rc.PetEnabled || rc.PetProbabilityPercent != 37 || !rc.PetArtifactEnabled || !reflect.DeepEqual(rc.PetArtifactSlots, []int{31, 33}) || rc.MinPetArtifactSlots != 1 || rc.MaxPetArtifactSlots != 1 {
 		t.Fatalf("pet settings not loaded: enabled=%t probability=%d artifacts=%t slots=%v range=%d..%d", rc.PetEnabled, rc.PetProbabilityPercent, rc.PetArtifactEnabled, rc.PetArtifactSlots, rc.MinPetArtifactSlots, rc.MaxPetArtifactSlots)
+	}
+	if !rc.TitleEnabled || rc.TitleItem != 400330105 || rc.TitleTopItem != 400330106 || rc.TitleTopLevel != 85 {
+		t.Fatalf("title settings not loaded: enabled=%t item=%d top=%d level=%d", rc.TitleEnabled, rc.TitleItem, rc.TitleTopItem, rc.TitleTopLevel)
+	}
+	if rc.BlackDiamondEnabled || rc.BlackDiamondDays != 999 {
+		t.Fatalf("premium settings not loaded: enabled=%t days=%d", rc.BlackDiamondEnabled, rc.BlackDiamondDays)
 	}
 	if rc.StoreEquipmentStartBox != 9 || rc.StoreMaterialStartBox != 107 || rc.StoreEquipmentIntensifyMin != 8 || rc.StoreEquipmentIntensifyMax != 12 {
 		t.Fatalf("store pool config not loaded: %+v", rc)

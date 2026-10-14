@@ -92,6 +92,15 @@ func validateRuntimeConfig(dec *foundationconfig.Decoder, rc RuntimeConfig) erro
 	checkRange("pet", "max_pet_artifact_slots", rc.MaxPetArtifactSlots, 0, 3)
 	checkOrder("pet", "min_pet_artifact_slots", rc.MinPetArtifactSlots, "max_pet_artifact_slots", rc.MaxPetArtifactSlots)
 
+	checkRange("title", "title_item", rc.TitleItem, 1, 4294967295)
+	checkRange("title", "title_top_item", rc.TitleTopItem, 1, 4294967295)
+	checkRange("title", "title_top_level", rc.TitleTopLevel, 1, 255)
+
+	// A century is the ceiling: the expiry is carried as a unix second count, and
+	// a term beyond that would push the stored date past any year the client can
+	// render.
+	checkRange("premium", "black_diamond_days", rc.BlackDiamondDays, 1, 36500)
+
 	checkPositive("store", "store_equipment_price_min", rc.StoreEquipmentPriceMin)
 	checkPositive("store", "store_equipment_price_max", rc.StoreEquipmentPriceMax)
 	checkOrder("store", "store_equipment_price_min", rc.StoreEquipmentPriceMin, "store_equipment_price_max", rc.StoreEquipmentPriceMax)

@@ -201,6 +201,12 @@ func (a *SQLiteLoadoutApplier) ReconcileRobotLoadouts(ctx context.Context, accou
 		if err := a.reconcileRobotAuctionStock(ctx, account); err != nil {
 			return replaced, fmt.Errorf("reconcile 90CN auction stock uid=%d: %w", info.UID, err)
 		}
+		// The membership stage keeps no gate either: it is one account row, and a
+		// robot whose loadout is already current still has to be granted it. This
+		// is what backfills a fleet that existed before the stage did.
+		if err := a.ensureRobotBlackDiamond(ctx, account); err != nil {
+			return replaced, fmt.Errorf("reconcile 90CN black diamond uid=%d: %w", info.UID, err)
+		}
 	}
 	return replaced, nil
 }
@@ -375,7 +381,19 @@ func (a *SQLiteLoadoutApplier) applyAccountLoadout(ctx context.Context, account 
 		if err := a.applyRobotPet(jobCtx, db, row.characterID); err != nil {
 			return err
 		}
-		return a.applyRobotAuctionStock(jobCtx, db, row.characterID)
+		if err := a.applyRobotAuctionStock(jobCtx, db, row.characterID); err != nil {
+			return err
+		}
+		// The membership is account-scoped, so it is granted here rather than per
+		// character: every character the account holds, now or later, inherits it.
+		// Written on the connection this job already holds -- ensureRobotBlackDiamond
+		// queues on the executor, which is running this job.
+		if days := a.blackDiamondGrantDays(); days > 0 {
+			if err := writeBlackDiamondExpiry(jobCtx, db, account, days, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
