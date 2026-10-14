@@ -2,15 +2,28 @@ package shared
 
 import "strings"
 
-// BlockedItemNameFragment is the name fragment of PVF records that exist only
-// as release placeholders: the client renders the name, but the record carries
-// no gameplay data and looks unfinished in a live world. No robot may ever be
-// granted one.
-const BlockedItemNameFragment = "后续确认"
+// BlockedItemNameFragments are the name fragments of PVF records no robot may
+// ever be granted:
+//   - 后续确认: release placeholders. The client renders the name, but the
+//     record carries no gameplay data and looks unfinished in a live world.
+//   - 活动: event-only gear and 装扮 that the live world does not run.
+//   - 租: rental items, which the system reclaims.
+var BlockedItemNameFragments = []string{"后续确认", "活动", "租"}
 
-// ItemNameBlocked reports whether a catalog item name is a release placeholder.
+// ItemNameBlocked reports whether a catalog item name carries a blocked
+// fragment. A nameless record is not this function's business: the catalog
+// projection blocks those itself, where it can tell a missing [name] apart from
+// a name that was never read.
 func ItemNameBlocked(name string) bool {
-	return name != "" && strings.Contains(name, BlockedItemNameFragment)
+	if name == "" {
+		return false
+	}
+	for _, fragment := range BlockedItemNameFragments {
+		if strings.Contains(name, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 type EquipmentCatalogItem struct {

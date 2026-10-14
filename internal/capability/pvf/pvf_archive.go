@@ -154,7 +154,7 @@ func appendItemInfoCreatureArtifacts(equipment []shared.EquipmentCatalogItem, ra
 		if !ok {
 			continue
 		}
-		equipment = append(equipment, shared.EquipmentCatalogItem{
+		item := shared.EquipmentCatalogItem{
 			ID:       id,
 			Name:     cleanPVFString(fields[14]),
 			Name2:    cleanPVFString(fields[15]),
@@ -166,7 +166,11 @@ func appendItemInfoCreatureArtifacts(equipment []shared.EquipmentCatalogItem, ra
 			Attach:   "trade",
 			Trade:    true,
 			Auction:  true,
-		})
+		}
+		if item.Name == "" || shared.ItemNameBlocked(item.Name) || item.Rarity == chronicleRarity {
+			item.GrantBlocked = true
+		}
+		equipment = append(equipment, item)
 		seen[id] = true
 	}
 	return equipment
@@ -186,6 +190,12 @@ func creatureArtifactCategory(category string) (string, int, bool) {
 		return "", 0, false
 	}
 }
+
+// chronicleRarity is 勇者 (Chronicle) gear. No robot may wear it: it is the 异界
+// set, it renders red in the client, and the operator has ruled it out of the
+// fleet. Keep in step with equipment.RarityChronicle, which keeps the level
+// bands off it as well.
+const chronicleRarity = 5
 
 func extractItemList(a *pvfArchive, listPath, prefix string, stackable bool) []shared.EquipmentCatalogItem {
 	return extractItemListFromText(a.text, listPath, prefix, stackable)
@@ -301,6 +311,16 @@ func extractItemListFromText(readText func(string) string, listPath, prefix stri
 			item.SetKey = deriveItemSetKey(itemPath, body, item)
 		} else if strings.Contains(strings.ToLower(item.Slot), "recipe") {
 			item.RecipeTargetID = parseRecipeTargetID(body)
+		}
+		// Nothing the client cannot resolve may reach a robot. The game client
+		// and the GM tool both key their item lookup on the [name] record, so a
+		// nameless entry renders as an empty, iconless item; the archive's file
+		// tree holds tens of thousands of those, mostly 时装 and 宠物. 勇者 gear
+		// is barred by the operator's rule rather than by resolution. Marking
+		// both here, once, keeps every grant path honest: they all already
+		// refuse a GrantBlocked item.
+		if item.Name == "" || item.BadName || item.Rarity == chronicleRarity {
+			item.GrantBlocked = true
 		}
 		if item.ID > 0 && (item.ItemType > 0 || stackable) {
 			out = append(out, item)
