@@ -278,6 +278,18 @@ func (a *Actor) tick(now time.Time) {
 			foundationlog.Robotf("[Actor] emote_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
 		}
 	}
+	if !isStore && a.nextDungeonEnterDue(now, rc) {
+		var res robotcap.ActionResult
+		a.runBusy("dungeon_enter", func() {
+			res = a.runtime.AutoDungeonEnter(uid)
+		})
+		// A refused or failed entry is ordinary dungeon business and stays inside
+		// the round, for the same reason the auction, mail and emote rounds log
+		// rather than count.
+		if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] dungeon_enter_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
 	if !isStore && a.nextMoveDue(now, rc) {
 		a.runBusy("move", func() {
 			a.runtime.AutoMove(uid)
@@ -300,6 +312,7 @@ func (a *Actor) clearAutoActionSchedule() {
 	a.nextAuction = time.Time{}
 	a.nextMail = time.Time{}
 	a.nextEmote = time.Time{}
+	a.nextDungeonEnter = time.Time{}
 	a.nextServerNotice = time.Time{}
 }
 
@@ -310,6 +323,7 @@ func (a *Actor) clearAutoScheduleLocked() {
 	a.nextAuction = time.Time{}
 	a.nextMail = time.Time{}
 	a.nextEmote = time.Time{}
+	a.nextDungeonEnter = time.Time{}
 	a.nextServerNotice = time.Time{}
 	a.storeUntil = time.Time{}
 }
@@ -404,6 +418,19 @@ func (a *Actor) nextEmoteDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	return a.randomizedDue(&a.nextEmote, now, rc.AutoEmoteIntervalMinSec, rc.AutoEmoteIntervalMaxSec)
+}
+
+// nextDungeonEnterDue paces one robot's dungeon round trip. The interval is
+// measured in minutes because the round commits a run on the character and the
+// server records it: this is the least frequent thing a robot does, not a
+// social tick.
+func (a *Actor) nextDungeonEnterDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
+	if !rc.AutoDungeonEnter {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.randomizedDue(&a.nextDungeonEnter, now, rc.AutoDungeonEnterIntervalMinSec, rc.AutoDungeonEnterIntervalMaxSec)
 }
 
 // nextServerNoticeDue is the per-robot timer. The fleet-wide gap and hourly

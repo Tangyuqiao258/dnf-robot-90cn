@@ -172,6 +172,22 @@ func (c *Client) SelectDungeon(ctx context.Context, dungeonID uint32, difficulty
 	return c.send(ctx, CmdSelectDungeon, SelectDungeonBody(dungeonID, difficulty))
 }
 
+// FinishLoading acknowledges that the dungeon scene has loaded. The server
+// gates the body on its length alone and reads no field, but it releases the
+// character-state push, the skill frame and the room placement only once this
+// arrives, so an entry that stops at the op16 acknowledgement leaves the
+// character inside a run it never finishes loading into.
+func (c *Client) FinishLoading(ctx context.Context) error {
+	return c.send(ctx, CmdFinishLoading, FinishLoadingBody())
+}
+
+// GiveUpDungeon abandons the run the character is inside. The server answers
+// with the typed scene transition back to the town the entry froze, and with
+// nothing else; it drops the request without a reply while no run is active.
+func (c *Client) GiveUpDungeon(ctx context.Context) error {
+	return c.send(ctx, CmdGiveupGame, nil)
+}
+
 // DeclareDeath reports the character as dead. Death is client-declared in this
 // protocol generation; the server arms a ten second timer that returns the
 // character to town unless a revive arrives first.

@@ -138,6 +138,136 @@ func TestLiveDungeonDeathRevive(t *testing.T) {
 	t.Logf("test character removed")
 }
 
+// TestLiveDungeonEnterAndReturn proves the whole leader-side round trip against
+// the real server: the session binds its town return origin (op35), opens the
+// selector (op15), commits a solo entry (op16), acknowledges the scene load
+// (op37) and then abandons the run (op42) and waits for the town transition
+// that says the character is back.
+//
+// The two halves are asserted separately on purpose. The run is active from the
+// op16 acknowledgement alone, so InDungeon() would be true even if the scene
+// never came up; DungeonLoaded() is what says the server released it, and that
+// is the state a later feature would have to work from.
+//
+// Nothing here follows a party into a run: this is a one-member entry.
+func TestLiveDungeonEnterAndReturn(t *testing.T) {
+	if os.Getenv("CN90_LIVE_PROTOCOL") != "1" {
+		t.Skip("set CN90_LIVE_PROTOCOL=1 to run the live dungeon round trip")
+	}
+	root := liveRuntimeRoot(t)
+	serverLayout, err := resolveRuntimeLayout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminAddress, adminToken, err := serverLayout.adminEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels, _, err := resolveChannelCatalog(serverLayout, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !liveListener(t, channels) {
+		t.Skipf("no live 90CN game listener among %v", channels.ports)
+	}
+	// The account is deliberately one no other live test claims. Several of them
+	// share a name and re-provision over each other's leftovers, which reads as a
+	// flake in whichever test happens to run second.
+	const (
+		account = "robot17000016"
+		name    = "进本己"
+		uid     = 17000016
+	)
+	binder := NewAccountBinder(adminAddress, adminToken)
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+	defer cancel()
+
+	provisioner := Provisioner{ConnectHost: "127.0.0.1", Channels: channels, Timeout: 30 * time.Second, Binder: binder}
+	if err := liveClearAccount(ctx, binder, channels, account); err != nil {
+		t.Fatalf("pre-clean %s: %v", account, err)
+	}
+	result, err := provisioner.ProvisionCharacter(ctx, shared.ProvisionCharacterRequest{
+		AccountName: account, CharacterName: name, Job: 0, RobotUID: uid,
+	})
+	if err != nil {
+		t.Fatalf("provision %s: %v", account, err)
+	}
+	if !result.Created || result.BackendSlot == nil {
+		t.Fatalf("provision result for %s = %+v", account, result)
+	}
+
+	factory := SessionFactory{ConnectHost: "127.0.0.1", Channels: channels, Timeout: 30 * time.Second, Binder: binder}
+	session, err := factory.OpenSession(ctx, shared.OpenSessionRequest{
+		AccountName: account, CharacterSlot: *result.BackendSlot,
+		InitialTownKnown: true, InitialVillage: 38, InitialArea: 1, InitialX: 450, InitialY: 234,
+	})
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	live, ok := session.(*Session)
+	if !ok {
+		t.Fatal("unexpected session type")
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = session.Close()
+		}
+	}()
+	t.Logf("session online: account=%s cid=%d", account, live.selfCharacterID)
+	if live.InDungeon() {
+		t.Fatal("a session in town started out inside a run")
+	}
+
+	if err := live.EnterDungeon(ctx, liveDungeonID, 0); err != nil {
+		t.Fatalf("dungeon entry: %v", err)
+	}
+	if !live.InDungeon() {
+		t.Fatal("a successful entry did not leave a run active")
+	}
+	if !live.DungeonLoaded() {
+		t.Fatal("the entry returned before the scene finished loading")
+	}
+	if dungeonID, _, _ := live.DungeonIdentity(); dungeonID != liveDungeonID {
+		t.Fatalf("dungeon identity = %d want %d", dungeonID, liveDungeonID)
+	}
+	t.Logf("scene loaded: dungeon=%d", liveDungeonID)
+
+	if err := live.LeaveDungeon(ctx); err != nil {
+		t.Fatalf("dungeon exit: %v", err)
+	}
+	if live.InDungeon() {
+		t.Fatal("the exit left the run marked active")
+	}
+	if live.DungeonLoaded() {
+		t.Fatal("the exit left the scene marked loaded")
+	}
+	t.Logf("character returned to town")
+
+	// A second entry proves the origin the server froze on the first one is not
+	// what made the first one work: the town scene was rebuilt in between, so the
+	// session has to re-bind its position the same way it did at login.
+	if err := live.EnterDungeon(ctx, liveDungeonID, 0); err != nil {
+		t.Fatalf("second dungeon entry: %v", err)
+	}
+	if !live.DungeonLoaded() {
+		t.Fatal("the second entry returned before the scene finished loading")
+	}
+	if err := live.LeaveDungeon(ctx); err != nil {
+		t.Fatalf("second dungeon exit: %v", err)
+	}
+	t.Logf("second round trip completed")
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+	closed = true
+	if err := liveClearAccount(ctx, binder, channels, account); err != nil {
+		t.Fatalf("cleanup %s: %v", account, err)
+	}
+	t.Logf("test character removed")
+}
+
 // TestLiveDungeonDeathInTownIsDropped pins the reason the entry above exists:
 // with no active run the server drops a client-declared death without answering
 // at all, so a caller can never tell a dropped op40 from a slow one.

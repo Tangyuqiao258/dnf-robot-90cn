@@ -101,6 +101,11 @@ type RuntimeConfig struct {
 	AutoPartyAccept                 bool   `json:"auto_party_accept"`
 	AutoPartyFollow                 bool   `json:"auto_party_follow"`
 	AutoDungeonRevive               bool   `json:"auto_dungeon_revive"`
+	AutoDungeonEnter                bool   `json:"auto_dungeon_enter"`
+	AutoDungeonEnterID              int    `json:"auto_dungeon_enter_id"`
+	AutoDungeonEnterDifficulty      int    `json:"auto_dungeon_enter_difficulty"`
+	AutoDungeonEnterIntervalMinSec  int    `json:"auto_dungeon_enter_interval_min_sec"`
+	AutoDungeonEnterIntervalMaxSec  int    `json:"auto_dungeon_enter_interval_max_sec"`
 	AutoChatReply                   bool   `json:"auto_chat_reply"`
 	AutoTrade                       bool   `json:"auto_trade"`
 	AutoSystemAnnouncement          bool   `json:"auto_system_announcement"`

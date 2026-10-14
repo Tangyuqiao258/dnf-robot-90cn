@@ -83,6 +83,9 @@ func (r *reconnectRuntime) AutoMail(uid int) robotcap.ActionResult {
 func (r *reconnectRuntime) AutoEmote(uid int, _ uint16) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }
+func (r *reconnectRuntime) AutoDungeonEnter(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
 func (r *reconnectRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }

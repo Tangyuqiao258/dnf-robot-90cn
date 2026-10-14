@@ -12,11 +12,15 @@ type BackendID string
 type BackendCapability string
 
 const (
-	CapabilityProvision          BackendCapability = "provision"
-	CapabilityTownMove           BackendCapability = "town_move"
-	CapabilityDungeonMove        BackendCapability = "dungeon_move"
-	CapabilityDungeonFollow      BackendCapability = "dungeon_follow"
-	CapabilityDungeonRevive      BackendCapability = "dungeon_revive"
+	CapabilityProvision     BackendCapability = "provision"
+	CapabilityTownMove      BackendCapability = "town_move"
+	CapabilityDungeonMove   BackendCapability = "dungeon_move"
+	CapabilityDungeonFollow BackendCapability = "dungeon_follow"
+	CapabilityDungeonRevive BackendCapability = "dungeon_revive"
+	// CapabilityDungeonEnter is the leader-side entry: a session that can open
+	// the dungeon selector and commit a run for itself. It says nothing about
+	// moving inside that run, which is CapabilityDungeonMove.
+	CapabilityDungeonEnter       BackendCapability = "dungeon_enter"
 	CapabilityShout              BackendCapability = "shout"
 	CapabilityWorldShout         BackendCapability = "world_shout"
 	CapabilityStore              BackendCapability = "store"
@@ -145,7 +149,7 @@ func DecodeBackendSelection(data []byte) (BackendSelection, error) {
 // without also being seeded here.
 var allCapabilities = []BackendCapability{
 	CapabilityProvision, CapabilityTownMove, CapabilityDungeonMove, CapabilityDungeonFollow,
-	CapabilityDungeonRevive,
+	CapabilityDungeonRevive, CapabilityDungeonEnter,
 	CapabilityShout, CapabilityWorldShout, CapabilityStore, CapabilityParty, CapabilityGuildInvite,
 	CapabilityPartyDebug, CapabilitySkill, CapabilityEmote,
 	CapabilityMarket, CapabilityTrade, CapabilityCleanup, CapabilityDangerousDelete,

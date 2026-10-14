@@ -34,6 +34,10 @@ const (
 	// death report has no failure reply at all, so a timeout is how a silently
 	// dropped op40 shows up.
 	dungeonDeathAckTimeout = 5 * time.Second
+	// dungeonLoadingTimeout bounds the wait for the character-state push that
+	// answers the loading acknowledgement. It is wider than a plain round trip
+	// because the server builds the dungeon scene before it answers.
+	dungeonLoadingTimeout = 10 * time.Second
 )
 
 // townPositionState is the last town coordinate the session reported with op35.
@@ -79,6 +83,10 @@ type dungeonState struct {
 	difficulty byte
 	// dead is true between a death notice and the matching revive notice.
 	dead bool
+	// loaded is true once the server has answered the loading acknowledgement.
+	// A run is active from the op16 reply alone, but the character only stands
+	// in the dungeon once the server has released the scene behind op37.
+	loaded bool
 }
 
 func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
@@ -88,6 +96,7 @@ func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
 	st.dungeonID = dungeonID
 	st.difficulty = difficulty
 	st.dead = false
+	st.loaded = false
 }
 
 // markLeft clears the run. The server sends the town transition (class0/op24)
@@ -100,12 +109,25 @@ func (st *dungeonState) markLeft() {
 	st.dungeonID = 0
 	st.difficulty = 0
 	st.dead = false
+	st.loaded = false
 }
 
 func (st *dungeonState) markDeath(revived bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.dead = !revived
+}
+
+func (st *dungeonState) markLoaded() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.loaded = true
+}
+
+func (st *dungeonState) isLoaded() bool {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.loaded
 }
 
 func (st *dungeonState) snapshot() (active bool, dungeonID uint32, difficulty byte, dead bool) {
@@ -141,6 +163,16 @@ func (s *Session) DungeonIdentity() (uint32, byte, bool) {
 	}
 	active, dungeonID, difficulty, _ := s.dungeon.snapshot()
 	return dungeonID, difficulty, active
+}
+
+// DungeonLoaded reports whether the dungeon scene finished loading. A run can
+// be active without it: op16 commits the run, and only the loading
+// acknowledgement makes the server release the scene the character stands in.
+func (s *Session) DungeonLoaded() bool {
+	if s == nil || s.dungeon == nil {
+		return false
+	}
+	return s.dungeon.isLoaded()
 }
 
 // startDungeonTracking installs the observer that keeps the run and death state
@@ -232,6 +264,13 @@ func (s *Session) observeDungeon(packet protocol.Packet) {
 			default:
 			}
 		}
+	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiFinishLoading:
+		// The character-state push that answers the loading acknowledgement.
+		// It only means "the scene is up" inside a run, so it is ignored when
+		// no run is active rather than taken as proof of one.
+		if active, _, _, _ := state.snapshot(); active {
+			state.markLoaded()
+		}
 	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiSceneTransition:
 		state.markLeft()
 	}
@@ -259,7 +298,7 @@ func (s *Session) EnterDungeon(ctx context.Context, dungeonID uint32, difficulty
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 2*dungeonSelectAckTimeout)
+		ctx, cancel = context.WithTimeout(ctx, 2*dungeonSelectAckTimeout+dungeonLoadingTimeout)
 		defer cancel()
 	}
 	if err := s.reportTownPosition(ctx); err != nil {
@@ -280,7 +319,101 @@ func (s *Session) EnterDungeon(ctx context.Context, dungeonID uint32, difficulty
 	}
 	foundationlog.Robotf("CN90_DUNGEON_ENTERED cid=%d dungeon=%d difficulty=%d\n",
 		s.selfCharacterID, dungeonID, difficulty)
+	// The run is live from the op16 reply, but the scene is not. The server
+	// holds the character-state push, the skill frame and the room placement
+	// until the loading acknowledgement arrives, so an entry that stops here
+	// leaves the character inside a run it never finishes loading into.
+	if err := s.finishDungeonLoading(ctx); err != nil {
+		return err
+	}
+	foundationlog.Robotf("CN90_DUNGEON_LOADED cid=%d dungeon=%d\n", s.selfCharacterID, dungeonID)
 	return nil
+}
+
+// finishDungeonLoading sends the op37 acknowledgement and waits for the
+// server's own class0/op37 character-state push, which is the only signal that
+// the dungeon scene is up.
+//
+// A timeout does not undo the entry: op16 already committed the run. It means
+// the character is inside a run whose scene never finished loading, so the
+// caller is told rather than left to assume the entry completed.
+func (s *Session) finishDungeonLoading(ctx context.Context) error {
+	loaded := make(chan struct{}, 1)
+	cleanup := s.setPacketObserver(func(packet protocol.Packet) {
+		if packet.Class != protocol.ClassNotice || packet.Type != protocol.NotiFinishLoading {
+			return
+		}
+		select {
+		case loaded <- struct{}{}:
+		default:
+		}
+	})
+	defer cleanup()
+	if err := s.client.FinishLoading(ctx); err != nil {
+		return err
+	}
+	select {
+	case <-loaded:
+		if s.dungeon != nil {
+			s.dungeon.markLoaded()
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("op%d dungeon loading: %w", protocol.CmdFinishLoading, ctx.Err())
+	case <-s.Done():
+		return fmt.Errorf("90CN session ended while the dungeon was loading")
+	}
+}
+
+// LeaveDungeon abandons the run the session is inside and waits for the town
+// transition that confirms the character is back.
+//
+// The server answers op42 with nothing at all -- the class0/op24 scene
+// transition it rebuilds from the entry's frozen origin is the whole reply --
+// and it drops the request without a reply while no run is active. That is why
+// this refuses to send when no run is active rather than letting it time out:
+// a timeout is the shape of a dropped request, so sending one that is known to
+// be dropped would report a fault that never happened.
+func (s *Session) LeaveDungeon(ctx context.Context) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("90CN dungeon exit needs an open session")
+	}
+	if !s.InDungeon() {
+		return fmt.Errorf("90CN dungeon exit needs an active run")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, dungeonSelectAckTimeout)
+		defer cancel()
+	}
+	town := make(chan struct{}, 1)
+	cleanup := s.setPacketObserver(func(packet protocol.Packet) {
+		if packet.Class != protocol.ClassNotice || packet.Type != protocol.NotiSceneTransition {
+			return
+		}
+		select {
+		case town <- struct{}{}:
+		default:
+		}
+	})
+	defer cleanup()
+	if err := s.client.GiveUpDungeon(ctx); err != nil {
+		return err
+	}
+	select {
+	case <-town:
+		if s.dungeon != nil {
+			s.dungeon.markLeft()
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("op%d dungeon exit: %w", protocol.CmdGiveupGame, ctx.Err())
+	case <-s.Done():
+		return fmt.Errorf("90CN session ended while leaving the dungeon")
+	}
 }
 
 // reportTownPosition re-sends the last known town coordinate with op35 so the

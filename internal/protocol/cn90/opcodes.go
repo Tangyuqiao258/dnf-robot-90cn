@@ -26,11 +26,22 @@ const (
 	// the same number as a scene-transition message and lets the trade handler
 	// claim it first, but only while a trade is open on that session; nothing
 	// here ever sends it outside a trade.
-	CmdItemTradeState     uint16 = 24
-	CmdSetUserPosition    uint16 = 35
-	CmdSetUserArea        uint16 = 36
-	CmdDieCharacter       uint16 = 40
-	CmdUseCoin            uint16 = 41
+	CmdItemTradeState  uint16 = 24
+	CmdSetUserPosition uint16 = 35
+	CmdSetUserArea     uint16 = 36
+	// CmdFinishLoading is the loading acknowledgement the server waits for
+	// before it releases the dungeon scene. The run is already active by the
+	// time it is accepted -- op16 commits it -- so this is the step that turns
+	// "a run is running" into "the character is standing in it": the character
+	// state push, the skill frame and the room placement all follow it.
+	CmdFinishLoading uint16 = 37
+	CmdDieCharacter  uint16 = 40
+	CmdUseCoin       uint16 = 41
+	// CmdGiveupGame abandons the run the session is inside and is the only
+	// client-initiated exit besides the death timer. It is refused, silently,
+	// while no run is active, so it can never move a character that is merely
+	// standing in town.
+	CmdGiveupGame         uint16 = 42
 	CmdMailboxSend        uint16 = 94
 	CmdMailboxExtractItem uint16 = 95
 	CmdMailboxOpen        uint16 = 96
@@ -84,6 +95,11 @@ const (
 	// is inside a dungeon, not a precondition for entering one.
 	NotiDungeonInfo     uint16 = 28
 	NotiDungeonStartMap uint16 = 29
+	// NotiFinishLoading is the class-0 character-state push the server sends
+	// only after it has processed the op37 acknowledgement, so its arrival is
+	// the session's proof that the dungeon scene finished loading. It shares
+	// its number with CmdFinishLoading on the other side of the session.
+	NotiFinishLoading uint16 = 37
 	// NotiDungeonDeathState carries the acting session's own death and revive
 	// notices. The server never sends it to anyone else.
 	NotiDungeonDeathState uint16 = 32

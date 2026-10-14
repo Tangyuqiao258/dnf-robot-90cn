@@ -27,6 +27,7 @@ type RobotRuntime interface {
 	AutoAuction(uid int) robotcap.ActionResult
 	AutoMail(uid int) robotcap.ActionResult
 	AutoEmote(uid int, emotionIndex uint16) robotcap.ActionResult
+	AutoDungeonEnter(uid int) robotcap.ActionResult
 	AutoServerNotice(uid int, shouldStop func() bool) robotcap.ActionResult
 	ForceServerNotice(uid int) robotcap.ActionResult
 	ExpireStore(uid int) robotcap.ActionResult

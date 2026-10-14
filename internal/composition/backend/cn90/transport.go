@@ -235,6 +235,58 @@ func (t *ActionTransport) ChangeEmotion(uid int, emotionIndex uint16) (uint16, e
 	return emoter.ChangeEmotion(ctx, emotionIndex)
 }
 
+// dungeonActionTimeout is the ceiling for one whole dungeon round trip: the
+// entry budget the session applies itself (two acknowledgements plus the scene
+// load) with room for the exit leg after it. The session shortens its own
+// windows inside this, so the ceiling only has to be the outer bound.
+const dungeonActionTimeout = 60 * time.Second
+
+// EnterDungeon walks one session through a dungeon entry and waits until the
+// scene has loaded. It returns once the character is standing in the run, not
+// when the server has merely committed it.
+func (t *ActionTransport) EnterDungeon(uid int, dungeonID uint32, difficulty byte) error {
+	if t == nil {
+		return fmt.Errorf("90CN dungeon entry needs a transport")
+	}
+	session, err := t.session(uid)
+	if err != nil {
+		return err
+	}
+	entrant, ok := session.(interface {
+		EnterDungeon(context.Context, uint32, byte) error
+	})
+	if !ok {
+		return fmt.Errorf("90CN session does not expose the dungeon entry protocol")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dungeonActionTimeout)
+	defer cancel()
+	return entrant.EnterDungeon(ctx, dungeonID, difficulty)
+}
+
+// LeaveDungeon abandons the run a session is inside and waits until the
+// character is back in town. The exit is part of the entry contract rather than
+// a separate feature: nothing in this adapter drives a character inside a run,
+// so a robot left in one would sit there while the rest of its schedule assumes
+// it is in town.
+func (t *ActionTransport) LeaveDungeon(uid int) error {
+	if t == nil {
+		return fmt.Errorf("90CN dungeon exit needs a transport")
+	}
+	session, err := t.session(uid)
+	if err != nil {
+		return err
+	}
+	leaver, ok := session.(interface {
+		LeaveDungeon(context.Context) error
+	})
+	if !ok {
+		return fmt.Errorf("90CN session does not expose the dungeon exit protocol")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dungeonActionTimeout)
+	defer cancel()
+	return leaver.LeaveDungeon(ctx)
+}
+
 func (t *ActionTransport) MoveTown(ctx context.Context, command shared.RuntimeMoveCommand) error {
 	session, err := t.session(command.UID)
 	if err != nil {

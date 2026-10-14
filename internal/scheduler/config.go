@@ -337,6 +337,12 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 	if !m.backendInfo.Supports(shared.CapabilityDungeonRevive) {
 		rc.AutoDungeonRevive = false
 	}
+	// Entry is its own capability rather than part of the revive one: a backend
+	// can answer a death notice without being able to start a run, and the
+	// reverse is what the follower-side adapter would need.
+	if !m.backendInfo.Supports(shared.CapabilityDungeonEnter) {
+		rc.AutoDungeonEnter = false
+	}
 	// The reply rides on the same directed-message transport as a shout, so a
 	// backend that cannot send one cannot answer one either.
 	if !m.backendInfo.Supports(shared.CapabilityShout) {

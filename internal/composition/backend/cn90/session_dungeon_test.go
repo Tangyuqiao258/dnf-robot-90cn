@@ -39,7 +39,7 @@ func dungeonTestDeathNotice(objectKey uint16, revived bool) []byte {
 	return body
 }
 
-func TestSessionEnterDungeonWalksTheSelectorThenCommits(t *testing.T) {
+func TestSessionEnterDungeonWalksTheSelectorThenLoadsTheScene(t *testing.T) {
 	session, serverConn := newDungeonTestSession(t)
 	go func() {
 		cls, typ, body, ok := readTestLegacyFrame(serverConn, 5*time.Second)
@@ -79,6 +79,28 @@ func TestSessionEnterDungeonWalksTheSelectorThenCommits(t *testing.T) {
 		session.dispatchPacket(protocol.Packet{
 			Class: protocol.ClassCommand, Type: protocol.CmdSelectDungeon, Body: []byte{1, 0, 0},
 		})
+
+		// An active run is not yet a loaded scene: the server holds the
+		// character-state push until the loading acknowledgement arrives.
+		cls, typ, body, ok = readTestLegacyFrame(serverConn, 5*time.Second)
+		if !ok {
+			t.Errorf("no op37 loading acknowledgement was written")
+			return
+		}
+		if cls != protocol.ClassCommand || typ != protocol.CmdFinishLoading {
+			t.Errorf("loading frame = class %d op %d want class %d op %d",
+				cls, typ, protocol.ClassCommand, protocol.CmdFinishLoading)
+			return
+		}
+		// The server gates op37 on the body length alone, so the exact
+		// eight-byte shape is the whole contract.
+		if want := protocol.FinishLoadingBody(); !bytes.Equal(body, want) {
+			t.Errorf("op37 body = % X want % X", body, want)
+			return
+		}
+		session.dispatchPacket(protocol.Packet{
+			Class: protocol.ClassNotice, Type: protocol.NotiFinishLoading, Body: make([]byte, 87),
+		})
 	}()
 	if err := session.EnterDungeon(context.Background(), 0x0001abcd, 2); err != nil {
 		t.Fatalf("dungeon entry failed: %v", err)
@@ -86,8 +108,94 @@ func TestSessionEnterDungeonWalksTheSelectorThenCommits(t *testing.T) {
 	if !session.InDungeon() {
 		t.Fatal("a successful entry did not mark the run active")
 	}
+	if !session.DungeonLoaded() {
+		t.Fatal("a completed entry did not mark the scene loaded")
+	}
 	if dungeonID, difficulty, active := session.DungeonIdentity(); !active || dungeonID != 0x0001abcd || difficulty != 2 {
 		t.Fatalf("dungeon identity = (%d, %d, %v) want (0x0001abcd, 2, true)", dungeonID, difficulty, active)
+	}
+}
+
+func TestSessionLeaveDungeonGivesUpAndWaitsForTheTownTransition(t *testing.T) {
+	session, serverConn := newDungeonTestSession(t)
+	session.dungeon.markActive(5, 0)
+	session.dungeon.markLoaded()
+	go func() {
+		cls, typ, body, ok := readTestLegacyFrame(serverConn, 5*time.Second)
+		if !ok {
+			t.Errorf("no op42 give-up request was written")
+			return
+		}
+		if cls != protocol.ClassCommand || typ != protocol.CmdGiveupGame {
+			t.Errorf("give-up frame = class %d op %d want class %d op %d",
+				cls, typ, protocol.ClassCommand, protocol.CmdGiveupGame)
+			return
+		}
+		// The server reads no field and answers with the scene transition alone,
+		// so the empty body is the whole request.
+		if len(body) != 0 {
+			t.Errorf("op42 body = % X want it empty", body)
+			return
+		}
+		session.dispatchPacket(protocol.Packet{
+			Class: protocol.ClassNotice, Type: protocol.NotiSceneTransition, Body: []byte{1, 2, 3},
+		})
+	}()
+	if err := session.LeaveDungeon(context.Background()); err != nil {
+		t.Fatalf("dungeon exit failed: %v", err)
+	}
+	if session.InDungeon() {
+		t.Fatal("a completed exit left the run marked active")
+	}
+	if session.DungeonLoaded() {
+		t.Fatal("a completed exit left the scene marked loaded")
+	}
+}
+
+func TestSessionLeaveDungeonRefusesWithoutAnActiveRun(t *testing.T) {
+	session, serverConn := newDungeonTestSession(t)
+	// The server drops op42 without any reply while no run is active, so sending
+	// it in town would report a timeout for a request that was never going to be
+	// answered. The refusal has to happen before the write.
+	if err := session.LeaveDungeon(context.Background()); err == nil {
+		t.Fatal("an exit outside a run was accepted")
+	}
+	if _, _, _, ok := readTestLegacyFrame(serverConn, 300*time.Millisecond); ok {
+		t.Fatal("an exit outside a run wrote a frame")
+	}
+}
+
+func TestSessionEnterDungeonReportsASceneThatNeverLoads(t *testing.T) {
+	session, serverConn := newDungeonTestSession(t)
+	go func() {
+		if _, _, _, ok := readTestLegacyFrame(serverConn, 5*time.Second); !ok {
+			return
+		}
+		session.dispatchPacket(protocol.Packet{
+			Class: protocol.ClassCommand, Type: protocol.CmdEnterSelectDungeon, Body: []byte{1, 0},
+		})
+		if _, _, _, ok := readTestLegacyFrame(serverConn, 5*time.Second); !ok {
+			return
+		}
+		session.dispatchPacket(protocol.Packet{
+			Class: protocol.ClassCommand, Type: protocol.CmdSelectDungeon, Body: []byte{1, 0, 0},
+		})
+		// The acknowledgement is accepted and then the scene never comes up.
+		_, _, _, _ = readTestLegacyFrame(serverConn, 5*time.Second)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := session.EnterDungeon(ctx, 0x0001abcd, 0); err == nil {
+		t.Fatal("an entry whose scene never loaded returned no error")
+	}
+	// op16 commits the run before the scene is released, so the run stays active
+	// even though the entry reported a failure. A caller that took the error as
+	// "nothing happened" would leave the character inside a run.
+	if !session.InDungeon() {
+		t.Fatal("the committed run was cleared by the loading failure")
+	}
+	if session.DungeonLoaded() {
+		t.Fatal("a scene that never loaded was marked loaded")
 	}
 }
 

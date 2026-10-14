@@ -16,7 +16,7 @@ func TestMetadataReflectsVerifiedCapabilities(t *testing.T) {
 		shared.CapabilityCleanup, shared.CapabilityDangerousDelete, shared.CapabilityDatabase,
 		shared.CapabilityStore, shared.CapabilityParty, shared.CapabilityMarket,
 		shared.CapabilityMailNotification, shared.CapabilityEmote,
-		shared.CapabilityDungeonRevive, shared.CapabilityShout,
+		shared.CapabilityDungeonRevive, shared.CapabilityDungeonEnter, shared.CapabilityShout,
 		shared.CapabilityTrade,
 	} {
 		if !info.Supports(capability) {

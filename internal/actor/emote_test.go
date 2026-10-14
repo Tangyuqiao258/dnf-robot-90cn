@@ -20,6 +20,10 @@ func (r *emoteRuntime) AutoEmote(uid int, emotionIndex uint16) robotcap.ActionRe
 	return robotcap.ActionResult{UID: uid, OK: true, State: robotcap.ActionStateSent}
 }
 
+func (r *emoteRuntime) AutoDungeonEnter(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
+
 func newEmoteRuntime(rc robotconfig.RuntimeConfig) *emoteRuntime {
 	return &emoteRuntime{partyWaitRuntime: &partyWaitRuntime{
 		config: rc,

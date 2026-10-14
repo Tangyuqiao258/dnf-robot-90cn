@@ -27,6 +27,15 @@ func Default() RuntimeConfig {
 		MailEnabled: true, MailIntervalMinSec: 300, MailIntervalMaxSec: 900,
 		FollowRadiusX: 120, FollowRadiusY: 30, ShoutDelayMS: 1000, ShoutSendEnabled: true,
 		AutoActions: true, AutoMailNotify: true, AutoPartyAccept: true, AutoPartyFollow: true, AutoDungeonRevive: true, AutoChatReply: true, AutoTrade: true, AutoSystemAnnouncement: true, AutoTargetOnlineCount: 20,
+		// Dungeon entry is opt-in, unlike the social switches above it. Every
+		// other automatic action is undone by the next one, but an entry commits
+		// a run on the character and the dungeon it names is a property of the
+		// server's own PVF, so a fleet-wide default would send every robot into
+		// whatever dungeon id 3 happens to be. The id below is the lowest entry
+		// bar in the reference PVF (3 `Act1/MirkWood.dgn`, minimum level 1, no
+		// party limit, no fatigue tag); any other server has to override it.
+		AutoDungeonEnter: false, AutoDungeonEnterID: 3, AutoDungeonEnterDifficulty: 0,
+		AutoDungeonEnterIntervalMinSec: 600, AutoDungeonEnterIntervalMaxSec: 1800,
 		AutoServerNotice:                false,
 		ServerNoticeRobotIntervalMinSec: 900,
 		ServerNoticeRobotIntervalMaxSec: 3600,
@@ -293,6 +302,28 @@ func normalizeAutoSchedule(rc *RuntimeConfig) {
 	}
 	if rc.AutoEmoteIndexMax < rc.AutoEmoteIndexMin {
 		rc.AutoEmoteIndexMax = rc.AutoEmoteIndexMin
+	}
+	// The dungeon id and difficulty are clamped to the ranges the op16 request
+	// can carry rather than to what exists on any one server: which ids are real
+	// is a property of that server's PVF, and a silently wrapped id would name a
+	// different dungeon than the operator configured.
+	if rc.AutoDungeonEnterID < 1 {
+		rc.AutoDungeonEnterID = 1
+	}
+	if rc.AutoDungeonEnterDifficulty < 0 {
+		rc.AutoDungeonEnterDifficulty = 0
+	}
+	if rc.AutoDungeonEnterDifficulty > 255 {
+		rc.AutoDungeonEnterDifficulty = 255
+	}
+	// A dungeon round trip commits a run and is recorded on the character, so
+	// the floor is a minute even though the pacing itself is the operator's to
+	// choose. It is the one timer here whose floor is not just well-formedness.
+	if rc.AutoDungeonEnterIntervalMinSec < 60 {
+		rc.AutoDungeonEnterIntervalMinSec = 60
+	}
+	if rc.AutoDungeonEnterIntervalMaxSec < rc.AutoDungeonEnterIntervalMinSec {
+		rc.AutoDungeonEnterIntervalMaxSec = rc.AutoDungeonEnterIntervalMinSec + 600
 	}
 	if rc.AutoTargetOnlineCount < 0 {
 		rc.AutoTargetOnlineCount = 0

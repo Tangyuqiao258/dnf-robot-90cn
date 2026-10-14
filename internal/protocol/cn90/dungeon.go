@@ -56,6 +56,19 @@ func DungeonSelectAck(opcode uint16, body []byte) error {
 	return fmt.Errorf("cn90 dungeon select op %d was rejected", opcode)
 }
 
+// dungeonFinishLoadingBodySize is the op37 body length the server accepts. It
+// takes only the plain eight-byte shape or a sixteen-byte protected wrapper and
+// drops anything else without a reply, so the encoder emits the eight-byte one
+// the live client sends.
+const dungeonFinishLoadingBodySize = 8
+
+// FinishLoadingBody builds the eight-byte op37 loading acknowledgement: two
+// zero u32 words. The server gates on the length alone and decodes no field, so
+// there is nothing to fill in.
+func FinishLoadingBody() []byte {
+	return make([]byte, dungeonFinishLoadingBodySize)
+}
+
 // DieCharacterBody builds the four-byte op40 body: `u16 x, u16 y`.
 //
 // Death is client-declared in this protocol generation - the server keeps no

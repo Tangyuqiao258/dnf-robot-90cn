@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"fmt"
+	"math"
 	actormodel "robot/internal/actor"
 	robotcap "robot/internal/capability/robot"
 	robotaction "robot/internal/capability/robotaction"
@@ -492,6 +493,74 @@ func (r *RobotRuntime) AutoEmote(uid int, emotionIndex uint16) robotcap.ActionRe
 		return robotcap.ActionResult{
 			UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
 			Message: fmt.Sprintf("emotion=%d", stored),
+		}
+	})
+}
+
+// AutoDungeonEnter runs one robot through a whole dungeon round trip: it walks
+// the selector, commits a run, waits for the scene to load, and then abandons
+// the run so the character is back in town before the next action.
+//
+// The exit is not a courtesy. No backend adapter here drives a character inside
+// a run -- moving between rooms needs the current room cleared, which needs
+// combat -- so a robot that stayed would sit in the dungeon while every other
+// automatic action assumed it was in town. Entering and leaving is the whole
+// round trip this build can honestly claim, which is also why the switch that
+// turns it on is opt-in rather than part of the social defaults.
+//
+// The gates mirror AutoEmote, including the party check. A party owns its
+// member's run, and following a leader into a dungeon is a separate feature
+// this action must not stand in for.
+func (r *RobotRuntime) AutoDungeonEnter(uid int) robotcap.ActionResult {
+	return r.run(uid, func() robotcap.ActionResult {
+		if err := r.manager.requireBackendCapability(shared.CapabilityDungeonEnter); err != nil {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
+		}
+		st, ok := r.Status(uid)
+		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 || st.PartyActive || r.PartyActive(uid) {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
+		}
+		if st.RobotType == 2 || st.RobotType == 3 || st.StoreDisplayAck {
+			// Never disturb an active stall; the action timer retries later.
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "store_active"}
+		}
+		rc := r.Config()
+		if !rc.AutoDungeonEnter {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "disabled"}
+		}
+		// The id and the difficulty come from the server's own PVF, so a config
+		// pointing outside the wire range is refused here rather than truncated
+		// into a request for a different dungeon.
+		if rc.AutoDungeonEnterID <= 0 || rc.AutoDungeonEnterID > math.MaxUint32 {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled,
+				Message: fmt.Sprintf("dungeon id out of range: %d", rc.AutoDungeonEnterID)}
+		}
+		if rc.AutoDungeonEnterDifficulty < 0 || rc.AutoDungeonEnterDifficulty > math.MaxUint8 {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled,
+				Message: fmt.Sprintf("dungeon difficulty out of range: %d", rc.AutoDungeonEnterDifficulty)}
+		}
+		dungeons, ok := r.manager.actions.(interface {
+			EnterDungeon(int, uint32, byte) error
+			LeaveDungeon(int) error
+		})
+		if !ok {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "dungeon_enter_unsupported"}
+		}
+		dungeonID := uint32(rc.AutoDungeonEnterID)
+		difficulty := byte(rc.AutoDungeonEnterDifficulty)
+		if err := dungeons.EnterDungeon(uid, dungeonID, difficulty); err != nil {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed, Message: err.Error()}
+		}
+		if err := dungeons.LeaveDungeon(uid); err != nil {
+			// The entry itself succeeded, so the character really is inside a run
+			// the exit did not get it out of. Reporting that as a failed entry
+			// would hide the state the operator has to know about.
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed,
+				Message: fmt.Sprintf("entered dungeon=%d difficulty=%d but the exit failed: %v", dungeonID, difficulty, err)}
+		}
+		return robotcap.ActionResult{
+			UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
+			Message: fmt.Sprintf("dungeon=%d difficulty=%d", dungeonID, difficulty),
 		}
 	})
 }
