@@ -17,7 +17,7 @@
 | 服务端（显示 `display_name`） | `backend.title` | 打开服务端设置弹窗（服务端目录、游戏地址、端口、数据库覆盖） | 无 | 变更（应用后重建运行周期） | 应用后 toast「正在应用设置并重建运行周期...」 | `GET/POST /api/backend` |
 | 统计 | `header.statistics` | 打开只读人口报告（性别/职业/装备/装扮/区域） | 后端数据库能力可用 | 普通 | 弹窗展示 | `populationReport` |
 | 删除 | `header.purge` | 解锁后执行按规则彻底删除（CID / UID / 范围） | `dangerous_delete` 能力启用 | 高 | 解锁→填写→执行；toast 汇总已删除账号/角色/登记数 | `dangerousDeleteUnlock`、`dangerousDeleteAsync` |
-| 停止 | `header.stop` | 停止 Robot 进程并保存数据 | 无 | 高 | 确认弹窗；toast「Robot 正在保存数据并退出...」 | `POST /api/stop-robot` |
+| 停止 | `header.stop` | 停止 Robot 进程并保存数据 | 无 | 高 |Robot 正在保存数据并退出... | `POST /api/stop-robot` |
 | 中文 / English | `language.switch` | 切换界面语言并刷新 | 无 | 普通 | 立即生效 | 无 |
 | 退出 | `header.logout` | 注销 Web 会话 | 已登录 | 普通 | 跳转登录页 | `POST /logout` |
 
@@ -98,4 +98,4 @@
 
 - 每个按钮的 API 名称与 `internal/entry/tcpapi` 路由一致；能力门禁与 `descriptor.go` 的 `Capabilities` 一致，测试 `TestCommandCapabilitiesCoverBackendSpecificActions` 覆盖。
 - 后端不支持的接口返回明确 unsupported；Web 侧按能力禁用并显示原因（移动、喊话、清理、删除），未在界面暴露的接口（如 `robotsStore`）只能通过 API 调用，且同样受能力门禁约束。
-- 危险删除的二次确认由「解锁（123）」+「删除」两步组成；删除范围只包含机器人账号（`前缀+UID`），不会触碰其他账号。
+- 危险删除的二次解锁（123）+「删除」两步组成；删除范围只包含机器人账号（`前缀+UID`），不会触碰其他账号。
