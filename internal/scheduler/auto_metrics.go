@@ -94,7 +94,6 @@ func (m *RobotManager) updateAutoSnapshot(rc robotconfig.RuntimeConfig, summary 
 	m.autoStats.TargetOnline = rc.AutoTargetOnlineCount
 	m.autoStats.Running = summary.Running
 	m.autoStats.Connecting = summary.Connecting
-	m.autoStats.StoreProbability = rc.AutoStoreProbabilityPercent
 	m.autoStats.StoreRunning = summary.Stores
 	m.autoStats.StoreItemRunning = summary.ItemStores
 	m.autoStats.StoreDisjointRunning = summary.DisjointStores

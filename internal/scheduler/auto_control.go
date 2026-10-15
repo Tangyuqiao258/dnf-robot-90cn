@@ -127,7 +127,6 @@ func (m *RobotManager) AutoStatus() robotcap.AutoStatus {
 	if out.GamePortAddress == "" {
 		out.GamePortAddress = m.robotGamePortAddress()
 	}
-	out.StoreProbability = rc.AutoStoreProbabilityPercent
 	out.StoreRunning = stores
 	out.StoreItemRunning = summary.ItemStores
 	out.StoreDisjointRunning = summary.DisjointStores

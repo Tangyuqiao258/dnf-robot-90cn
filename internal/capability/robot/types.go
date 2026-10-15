@@ -323,7 +323,6 @@ type AutoStatus struct {
 	GamePortReady        bool      `json:"game_port_ready"`
 	GamePortAddress      string    `json:"game_port_address,omitempty"`
 	GamePortStableAt     time.Time `json:"game_port_stable_at,omitempty"`
-	StoreProbability     int       `json:"store_probability_percent"`
 	StoreRunning         int       `json:"store_running"`
 	StoreItemRunning     int       `json:"store_item_running"`
 	StoreDisjointRunning int       `json:"store_disjoint_running"`
