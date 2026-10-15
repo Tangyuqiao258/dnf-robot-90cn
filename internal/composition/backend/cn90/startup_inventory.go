@@ -97,7 +97,7 @@ func (s SQLiteStartupInventory) ScanAndClean(ctx context.Context) (StartupInvent
 		return result, fmt.Errorf("connect 90CN startup inventory: %w", err)
 	}
 	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
+	if err := applySQLiteWritePragmas(ctx, conn); err != nil {
 		return result, fmt.Errorf("configure 90CN startup inventory: %w", err)
 	}
 

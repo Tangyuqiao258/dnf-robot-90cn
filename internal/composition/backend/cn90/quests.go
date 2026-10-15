@@ -63,7 +63,7 @@ func SeedRobotQuestGates(ctx context.Context, databasePath string, robots []robo
 	}
 	defer db.Close()
 	configureSQLitePool(db)
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
+	if err := applySQLiteWritePragmas(ctx, db); err != nil {
 		return 0, fmt.Errorf("configure 90CN quest gate database: %w", err)
 	}
 	tx, err := db.BeginTx(ctx, nil)

@@ -71,7 +71,7 @@ func (p SQLiteRobotPurger) ExecuteDangerousDelete(ctx context.Context, requested
 		return purgeResult(requested, false), fmt.Errorf("connect 90CN purge database: %w", err)
 	}
 	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
+	if err := applySQLiteWritePragmas(ctx, conn); err != nil {
 		return purgeResult(requested, false), fmt.Errorf("configure 90CN purge database: %w", err)
 	}
 	tx, err := conn.BeginTx(ctx, nil)
@@ -134,7 +134,7 @@ func (p SQLiteRobotPurger) open(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("open 90CN purge database: %w", err)
 	}
 	configureSQLitePool(db)
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
+	if err := applySQLiteWritePragmas(ctx, db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("configure 90CN purge database: %w", err)
 	}

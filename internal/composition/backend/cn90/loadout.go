@@ -86,7 +86,7 @@ func NewSQLiteLoadoutApplier(ctx context.Context, databasePath string, config ro
 		return nil, fmt.Errorf("open 90CN loadout database: %w", err)
 	}
 	configureSQLitePool(db)
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
+	if err := applySQLiteWritePragmas(ctx, db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("configure 90CN loadout database: %w", err)
 	}
@@ -145,7 +145,7 @@ func (a *SQLiteLoadoutApplier) database(ctx context.Context) (*sql.DB, func(), e
 		return nil, nil, err
 	}
 	configureSQLitePool(db)
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
+	if err := applySQLiteWritePragmas(ctx, db); err != nil {
 		db.Close()
 		return nil, nil, err
 	}
@@ -161,6 +161,50 @@ func configureSQLitePool(db *sql.DB) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+}
+
+// sqliteWritePragmas is the connection setup every write path applies. It is
+// one string so the file-level choices are stated once.
+//
+// journal_mode is persistent in the database header, so the server normally
+// sets WAL for everyone; asserting it here means the robot keeps WAL even on a
+// file the server has not opened yet, instead of falling back to the rollback
+// journal, where every reader and writer contends on the same lock.
+//
+// synchronous is the opposite: it is per-connection and resets to SQLite's
+// default of FULL, which fsyncs the WAL on every commit. The server already
+// writes with synchronous=NORMAL (repository/sqlite/db.go), so the robot
+// running FULL was not being careful, it was being inconsistent -- and it made
+// the robot hold the single SQLite write lock for an fsync longer than the
+// server does, on the same file, for provisioning rows the reconcile passes
+// rewrite on every startup anyway. NORMAL in WAL mode cannot corrupt the
+// database on a crash; it can only lose the most recent commits, which for
+// this data is re-runnable work.
+const sqliteWritePragmas = `PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`
+
+// sqliteWritePragmasNoForeignKeys is the same setup minus foreign_keys, for the
+// one write path that deliberately never enabled it. Turning enforcement on is
+// a correctness change with nothing to do with the file-level write cost, and
+// spawn_redistribute rewrites character town/area rows in place, so it is the
+// last path that should start enforcing constraints as a side effect of a load
+// fix.
+const sqliteWritePragmasNoForeignKeys = `PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`
+
+// sqlitePragmaExecer is the narrow slice of *sql.DB and *sql.Conn the pragmas
+// need, so a path that pins a single connection for its whole transaction can
+// configure that same connection rather than the pool.
+type sqlitePragmaExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func applySQLiteWritePragmas(ctx context.Context, target sqlitePragmaExecer) error {
+	_, err := target.ExecContext(ctx, sqliteWritePragmas)
+	return err
+}
+
+func applySQLiteWritePragmasNoForeignKeys(ctx context.Context, target sqlitePragmaExecer) error {
+	_, err := target.ExecContext(ctx, sqliteWritePragmasNoForeignKeys)
+	return err
 }
 
 // ApplyCharacterLoadout regenerates the account's worn equipment and avatars.

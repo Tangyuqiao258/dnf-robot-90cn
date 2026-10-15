@@ -62,7 +62,7 @@ func RedistributeRobotSpawnsWithMaps(ctx context.Context, databasePath, accountP
 	}
 	defer db.Close()
 	configureSQLitePool(db)
-	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=5000;`); err != nil {
+	if err := applySQLiteWritePragmasNoForeignKeys(ctx, db); err != nil {
 		return 0, err
 	}
 	rows, err := db.QueryContext(ctx,
