@@ -345,6 +345,12 @@ func (t *ActionTransport) MoveTown(ctx context.Context, command shared.RuntimeMo
 			return shared.UnsupportedCapabilityError{Backend: BackendID, Operation: shared.CapabilityTownMove, Reason: "90CN area transition protocol is not available on this session"}
 		}
 		if err := areaMover.MoveTownArea(ctx, shared.TownAreaMoveIntent{Village: command.Village, Area: command.Area, X: int16(command.X), Y: int16(command.Y), SourceVillage: status.Village}); err != nil {
+			// The transition failed, but the server may still have announced a
+			// landing — a room answers a request to leave it with the room's own
+			// exit target. That announcement is where the character really
+			// stands, and keeping the old belief would make every later move
+			// originate from a map it already left.
+			t.adoptObservedTownArea(command.UID, session)
 			return err
 		}
 	}
@@ -364,6 +370,37 @@ func (t *ActionTransport) MoveTown(ctx context.Context, command shared.RuntimeMo
 	t.locationKnown[command.UID] = true
 	t.mu.Unlock()
 	return nil
+}
+
+// adoptObservedTownArea rewrites one robot's believed location from the last
+// area notification its session saw. The server is the authority: when it
+// answers a transition with a map other than the requested one (the Seria lobby
+// has no direct cross-town portal, so it answers with the room's own exit), the
+// character stands where the server said, and a transport that kept the
+// requested position would send every later move from a scene the character has
+// already left. Observed coordinates are kept as the movement target for the
+// next step, so the caller's own X/Y is not carried over.
+func (t *ActionTransport) adoptObservedTownArea(uid int, session shared.RobotSession) {
+	observer, ok := session.(interface {
+		LastTownAreaObservation() (townAreaObservation, bool)
+	})
+	if !ok {
+		return
+	}
+	observation, valid := observer.LastTownAreaObservation()
+	if !valid {
+		return
+	}
+	t.mu.Lock()
+	updated := t.status[uid]
+	updated.UID = uid
+	updated.Village = observation.village
+	updated.Area = observation.area
+	updated.X = int(observation.x)
+	updated.Y = int(observation.y)
+	t.status[uid] = updated
+	t.locationKnown[uid] = true
+	t.mu.Unlock()
 }
 
 func (t *ActionTransport) ShoutLocal(ctx context.Context, command shared.RuntimeShoutCommand) error {

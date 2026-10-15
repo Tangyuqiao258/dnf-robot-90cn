@@ -93,6 +93,16 @@ type Session struct {
 	// transport seeds its location map from it, because the town the open
 	// request asked for is only a wish the server may have refused.
 	loginLanding loginLanding
+	// townArea is the answer the server gave to the most recent area
+	// transition. It is recorded even when the answer names a map other than
+	// the requested one: the Seria lobby (38/1) has no direct cross-town
+	// portal, so it answers a request to leave the room with the room's own
+	// exit target, and that answer is where the character really stands.
+	townAreaMu lockhub.Locker
+	townArea   townAreaObservation
+	// townAreaLogs bounds the diagnostics one session may print for those
+	// answers, so a robot that keeps failing cannot flood the log.
+	townAreaLogs int
 	// reviveQueue carries death notices to the revive worker. It is nil unless
 	// the session was opened with EnableDungeonRevive, which is what keeps the
 	// observer from queueing work nobody will send.
@@ -447,6 +457,85 @@ func (s *Session) rememberTownPosition(x, y int16, direction byte, motion uint16
 	s.townPosition.mark(x, y, direction, motion)
 }
 
+// townAreaObservation is the location an area notification announced. It is the
+// only trustworthy statement about where the character stands after a
+// transition, because the server may answer a request with a different map than
+// the one it asked for.
+type townAreaObservation struct {
+	village int
+	area    int
+	x       int16
+	y       int16
+	at      time.Time
+	valid   bool
+}
+
+// townAreaAnswersBudget bounds the redirect/unconfirmed diagnostics one session
+// prints. A robot that cannot leave the Seria lobby repeats the same transition
+// every store round, and one line per session is already more than enough to
+// see it.
+const townAreaAnswersBudget = 8
+
+// townAreaAnswer classifies one inbound area notification against a transition
+// the caller is waiting for. It reports whether the announcement confirms the
+// request, and it returns the announced location either way so the caller can
+// record where the character really stands.
+func townAreaAnswer(packet protocol.Packet, self uint16, intent shared.TownAreaMoveIntent) (townAreaObservation, bool) {
+	if packet.Class != protocol.ClassNotice || packet.Type != protocol.NotiUserArea || len(packet.Body) < 8 {
+		return townAreaObservation{}, false
+	}
+	if self != 0 && binary.LittleEndian.Uint16(packet.Body[0:2]) != self {
+		// A peer's own area change carries that peer's key. It says nothing
+		// about where this session stands.
+		return townAreaObservation{}, false
+	}
+	observation := townAreaObservation{
+		village: int(packet.Body[2]),
+		area:    int(packet.Body[3]),
+		x:       int16(binary.LittleEndian.Uint16(packet.Body[4:6])),
+		y:       int16(binary.LittleEndian.Uint16(packet.Body[6:8])),
+		at:      time.Now(),
+		valid:   true,
+	}
+	confirmed := observation.village == intent.Village && observation.area == intent.Area &&
+		observation.x == intent.X && observation.y == intent.Y
+	return observation, confirmed
+}
+
+// LastTownAreaObservation reports where the server last put this session,
+// whether or not that is where a caller asked it to go.
+func (s *Session) LastTownAreaObservation() (townAreaObservation, bool) {
+	if s == nil {
+		return townAreaObservation{}, false
+	}
+	s.townAreaMu.Lock()
+	defer s.townAreaMu.Unlock()
+	return s.townArea, s.townArea.valid
+}
+
+func (s *Session) recordTownAreaObservation(observation townAreaObservation) {
+	if s == nil {
+		return
+	}
+	s.townAreaMu.Lock()
+	s.townArea = observation
+	s.townAreaMu.Unlock()
+}
+
+// takeTownAreaLogBudget spends one diagnostic line for this session.
+func (s *Session) takeTownAreaLogBudget() bool {
+	if s == nil {
+		return false
+	}
+	s.townAreaMu.Lock()
+	defer s.townAreaMu.Unlock()
+	if s.townAreaLogs >= townAreaAnswersBudget {
+		return false
+	}
+	s.townAreaLogs++
+	return true
+}
+
 func (s *Session) MoveTownArea(ctx context.Context, intent shared.TownAreaMoveIntent) error {
 	if intent.Village < 0 || intent.Village > 255 || intent.Area < 0 || intent.Area > 255 {
 		return fmt.Errorf("90CN town area out of range: %d/%d", intent.Village, intent.Area)
@@ -460,20 +549,31 @@ func (s *Session) MoveTownArea(ctx context.Context, intent shared.TownAreaMoveIn
 		defer cancel()
 	}
 	confirmed := make(chan struct{}, 1)
+	redirected := make(chan townAreaObservation, 1)
+	otherKinds := make(chan string, 4)
 	cleanup := s.setPacketObserver(func(packet protocol.Packet) {
-		if packet.Class != protocol.ClassNotice || packet.Type != protocol.NotiUserArea || len(packet.Body) < 8 ||
-			int(packet.Body[2]) != intent.Village ||
-			int(packet.Body[3]) != intent.Area ||
-			int16(binary.LittleEndian.Uint16(packet.Body[4:6])) != intent.X ||
-			int16(binary.LittleEndian.Uint16(packet.Body[6:8])) != intent.Y {
+		observation, matched := townAreaAnswer(packet, s.selfCharacterID, intent)
+		if !observation.valid {
+			select {
+			case otherKinds <- fmt.Sprintf("%d/%d", packet.Class, packet.Type):
+			default:
+			}
+			return
+		}
+		if matched {
+			select {
+			case confirmed <- struct{}{}:
+			default:
+			}
 			return
 		}
 		select {
-		case confirmed <- struct{}{}:
+		case redirected <- observation:
 		default:
 		}
 	})
 	defer cleanup()
+	s.recordTownAreaObservation(townAreaObservation{})
 	if intent.SourceVillage > 0 && intent.SourceVillage != intent.Village {
 		// Cross-town transitions only pass the server's route guard when the
 		// request carries the current town in the portal opaque field.
@@ -485,8 +585,38 @@ func (s *Session) MoveTownArea(ctx context.Context, intent shared.TownAreaMoveIn
 	}
 	select {
 	case <-confirmed:
+		s.recordTownAreaObservation(townAreaObservation{
+			village: intent.Village, area: intent.Area, x: intent.X, y: intent.Y,
+			at: time.Now(), valid: true,
+		})
 		return nil
+	case observation := <-redirected:
+		// The server answered, and the answer is not the requested map. Record
+		// it anyway: the character now stands there, and a caller that kept its
+		// own wish as the position would move from a map it already left.
+		s.recordTownAreaObservation(observation)
+		if s.takeTownAreaLogBudget() {
+			foundationlog.Robotf("[CN90_TOWN_AREA_REDIRECTED] cid=%d asked=%d/%d/%d/%d from=%d got=%d/%d/%d/%d\n",
+				s.selfCharacterID, intent.Village, intent.Area, intent.X, intent.Y, intent.SourceVillage,
+				observation.village, observation.area, observation.x, observation.y)
+		}
+		return fmt.Errorf("90CN town area transition answered elsewhere: asked %d/%d got %d/%d",
+			intent.Village, intent.Area, observation.village, observation.area)
 	case <-ctx.Done():
+		if s.takeTownAreaLogBudget() {
+			var kinds []string
+			for {
+				select {
+				case kind := <-otherKinds:
+					kinds = append(kinds, kind)
+					continue
+				default:
+				}
+				break
+			}
+			foundationlog.Robotf("[CN90_TOWN_AREA_UNCONFIRMED] cid=%d asked=%d/%d/%d/%d from=%d others=%v err=%v\n",
+				s.selfCharacterID, intent.Village, intent.Area, intent.X, intent.Y, intent.SourceVillage, kinds, ctx.Err())
+		}
 		return ctx.Err()
 	case <-s.Done():
 		return fmt.Errorf("90CN session ended during town area transition")
