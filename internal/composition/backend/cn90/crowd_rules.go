@@ -3,6 +3,7 @@ package cn90
 import (
 	"hash/fnv"
 	"sort"
+	"sync/atomic"
 
 	"robot/internal/foundation/lockhub"
 	"robot/internal/shared"
@@ -17,29 +18,40 @@ import (
 //
 //   - Seria exits: the maps a character lands in when leaving the Seria room.
 //     The room's portal table names them, and the enchanting stalls exist only
-//     here, one per map.
+//     here, one per map. A village's landing square is a gathering place, so it
+//     carries a crowd of its own.
 //   - Dungeon entrances: maps whose area declares dungeon gates. Each hosts one
 //     disassembler stall, whose machine the profession writer leaves at grade 11.
-//   - Connectors: maps that exist to link two towns and hold nothing else. They
-//     stay empty most of the time and hold a single wanderer otherwise.
+//     A gate hall is a gathering place too: players stand there while they wait.
+//   - Connectors: maps that exist to link two towns, or that a single door both
+//     enters and leaves, and that hold nothing else. They stay empty part of the
+//     time and hold a wanderer or two otherwise.
 //   - The main city gate: the Seria-exit map of the main town may grow denser
 //     than its neighbours.
 //   - Ordinary maps: everything else. Enchanting exists nowhere but the Seria
 //     exits, so an ordinary map hosts disassembler stalls only.
 const (
 	// crowdConnectorEmptyPercent is how often a connector mini-map stays empty.
-	// The rest of the time it holds exactly one non-stalling wanderer.
-	crowdConnectorEmptyPercent = 70
-	// crowdConnectorMaxRobots is the wanderer a connector mini-map may hold
-	// when it is not empty.
-	crowdConnectorMaxRobots = 1
+	// The rest of the time it holds a wanderer or two. The operator owns this
+	// trade: most roads empty reads as a world nobody walks, every road busy
+	// spends the fleet on maps a player only crosses.
+	crowdConnectorEmptyPercent = 30
+	// crowdConnectorMaxRobots is the default for how many robots a connector
+	// mini-map may hold when it is not empty. The operator owns the live value
+	// ([demand] junction_max_robots): a road is a place a player crosses rather
+	// than a place a crowd gathers, but a world whose roads are all empty reads
+	// as a world nobody walks.
+	crowdConnectorMaxRobots = 2
 	// crowdStallPerMap is how many expert-job stalls one map hosts: enchanting
 	// stalls on a Seria exit, disassembler stalls at a dungeon entrance.
 	crowdStallPerMap = 1
-	// crowdPlayerMapDistance is how many transitions from the player the world
-	// still has to look alive: maps farther than this close. "切换三次以内" is the
-	// operator's rule, and it has to agree with the floating layer's own reach or
-	// the layer would pin robots onto maps the crowd rules refuse.
+	// crowdPlayerMapDistance is the default for how many transitions from the
+	// player the world still has to look alive: maps farther than this close.
+	// The operator owns the live value ([demand] player_map_distance) because
+	// the rule trades against the online target: a fleet spread thin over a
+	// whole world is not a crowd the player ever sees, but a fleet penned into
+	// three rings of maps cannot reach its own target. Zero turns the walk off
+	// and leaves the whole world open.
 	crowdPlayerMapDistance = 3
 	// crowdMainCityVillage is Hendon Myre, the main town. Its Seria-exit map is
 	// the one the fleet may fill.
@@ -69,6 +81,15 @@ type CrowdRules struct {
 	mu        lockhub.RWLocker
 	playerKey shared.MapAreaKey
 	distance  map[shared.MapAreaKey]int
+	// distanceLimit is the live reach of the walk above. It is an atomic rather
+	// than a locked field because every placement decision reads it, and because
+	// a new limit never invalidates the walk: the distances are how far every
+	// map sits from the player, and the limit only decides which of them close.
+	distanceLimit atomic.Int64
+	// junctionMax is how many robots a connector mini-map may hold when it is
+	// not one of the roads that stay empty. An atomic for the same reason: the
+	// live value is the operator's, and every placement decision reads it.
+	junctionMax atomic.Int64
 }
 
 // NewCrowdRules derives the world's rules from the projected town catalog.
@@ -96,17 +117,71 @@ func NewCrowdRules(maps []shared.MapCatalogItem) *CrowdRules {
 			rules.roles[key] = CrowdRoleNormal
 		}
 	}
+	rules.distanceLimit.Store(crowdPlayerMapDistance)
+	rules.junctionMax.Store(crowdConnectorMaxRobots)
 	rules.recomputeLocked()
 	return rules
 }
 
-// crowdIsConnector reports whether a map exists only to link two towns: it has
-// neighbours in exactly two towns and opens neither onto the room. A town square
-// carries its own town plus its neighbours, so it lists more than two; a dead end
-// lists one.
+// SetJunctionMaxRobots sets how many robots a connector mini-map may hold when
+// it is not one of the roads that stay empty. Zero makes a junction an ordinary
+// area again, which leaves the operator's per-area cap to decide. Like the
+// distance walk, it is read from the runtime configuration so an operator edit
+// lands without a restart.
+func (r *CrowdRules) SetJunctionMaxRobots(limit int) {
+	if r == nil {
+		return
+	}
+	r.junctionMax.Store(int64(limit))
+}
+
+// junctionMaxRobots reports the live cap on a connector mini-map, or zero when
+// the operator turned the cap off.
+func (r *CrowdRules) junctionMaxRobots() int {
+	if r == nil {
+		return 0
+	}
+	return int(r.junctionMax.Load())
+}
+
+// SetPlayerMapDistance sets how many transitions from the player still take
+// robots. Zero or less turns the walk off, which opens the whole world: the
+// operator asks for that when the fleet's own target needs more maps than the
+// walk leaves open. It is called whenever the runtime configuration is read, so
+// an operator edit lands without a restart.
+func (r *CrowdRules) SetPlayerMapDistance(limit int) {
+	if r == nil {
+		return
+	}
+	r.distanceLimit.Store(int64(limit))
+}
+
+// playerMapDistance reports the live reach, or zero when the walk is off.
+func (r *CrowdRules) playerMapDistance() int {
+	if r == nil {
+		return 0
+	}
+	if limit := int(r.distanceLimit.Load()); limit > 0 {
+		return limit
+	}
+	return 0
+}
+
+// crowdIsConnector reports whether a map is a road rather than a place: it
+// exists only to link two towns, or it has a single entrance and the way out is
+// that same entrance, so a robot that walks in can only walk back out.
+//
+// Two kinds of map are never a road. A map that opens onto the Seria room is
+// where characters land and the room itself is where they arrive. A dungeon
+// entrance has a role of its own -- it hosts the disassembler its gate exists
+// for -- so it keeps that role whichever roads run past it.
 func crowdIsConnector(mp shared.MapCatalogItem) bool {
-	if mp.SeriaExit || len(mp.Links) == 0 {
+	if mp.SeriaExit || mp.DungeonGate || len(mp.Links) == 0 {
 		return false
+	}
+	// One link is one door, and the way out of the map is that door.
+	if len(mp.Links) == 1 {
+		return true
 	}
 	towns := make(map[int]struct{}, len(mp.Links))
 	for _, link := range mp.Links {
@@ -133,12 +208,21 @@ func (r *CrowdRules) CrowdMapRule(village, area int) shared.CrowdMapRule {
 	if r == nil {
 		return shared.CrowdMapRule{}
 	}
-	if distance, known := r.distanceOf(shared.MapAreaKey{Village: village, Area: area}); known && distance > crowdPlayerMapDistance {
-		return shared.CrowdMapRule{Closed: true}
+	if limit := r.playerMapDistance(); limit > 0 {
+		if distance, known := r.distanceOf(shared.MapAreaKey{Village: village, Area: area}); known && distance > limit {
+			return shared.CrowdMapRule{Closed: true}
+		}
 	}
 	switch r.Role(village, area) {
 	case CrowdRoleSeriaExit:
-		return shared.CrowdMapRule{StallKind: shared.ExpertJobStoreEnchant, StallMax: crowdStallPerMap}
+		// A village's landing square is where its characters appear, so it is the
+		// map a player stands in rather than walks past. It carries a crowd of
+		// its own, under the operator's cap for such maps.
+		return shared.CrowdMapRule{
+			CrowdExempt: true,
+			StallKind:   shared.ExpertJobStoreEnchant,
+			StallMax:    crowdStallPerMap,
+		}
 	case CrowdRoleMainCityGate:
 		// The main town's gate square is the one map allowed to fill up: the
 		// player crosses it on every trip, so it carries the crowd.
@@ -148,14 +232,20 @@ func (r *CrowdRules) CrowdMapRule(village, area int) shared.CrowdMapRule {
 			StallMax:    crowdStallPerMap,
 		}
 	case CrowdRoleDungeonEntrance:
-		return shared.CrowdMapRule{StallKind: shared.ExpertJobStoreDisjoint, StallMax: crowdStallPerMap}
+		// The hall a dungeon gate opens on is the other map players stand in
+		// while they wait, so it gathers a crowd for the same reason.
+		return shared.CrowdMapRule{
+			CrowdExempt: true,
+			StallKind:   shared.ExpertJobStoreDisjoint,
+			StallMax:    crowdStallPerMap,
+		}
 	case CrowdRoleConnector:
 		if crowdConnectorEmpty(village, area) {
 			return shared.CrowdMapRule{Closed: true}
 		}
-		// The wanderer a connector holds must not stall: the map is a road, not
+		// The wanderers a connector holds must not stall: the map is a road, not
 		// a market.
-		return shared.CrowdMapRule{MaxRobots: crowdConnectorMaxRobots}
+		return shared.CrowdMapRule{MaxRobots: r.junctionMaxRobots()}
 	case CrowdRoleNormal:
 		// Enchanting is reserved for the Seria exits, so an ordinary map hosts
 		// disassembler stalls only. Their count follows the store rotation: the

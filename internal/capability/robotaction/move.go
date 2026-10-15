@@ -142,6 +142,15 @@ func (s MoveService) AutoMove(info robotcap.Info, rc robotconfig.RuntimeConfig, 
 	if (targetVillage != info.Village || targetArea != info.Area) && !shared.GenericAreaAllowed(info.GuildID, targetVillage) {
 		return fmt.Errorf("generic area transport is unavailable for guild member destination %d/%d", targetVillage, targetArea)
 	}
+	// A destination the crowd rules keep out of reach - closed outright, or full
+	// to its transit ceiling - is not a failure: the robot simply stays where it
+	// is and wanders there instead, and the next round looks again. Refusing the
+	// move quietly is what keeps a closed scene from filling with robots that
+	// were only told to walk somewhere.
+	if (targetVillage != info.Village || targetArea != info.Area) && s.transitRefused(targetVillage, targetArea) {
+		targetVillage, targetArea = info.Village, info.Area
+		targetX, targetY = s.randomTarget(info, rc, maps)
+	}
 	steps := s.Env.RandBetween(mathx.MaxInt(2, rc.MoveSteps-1), mathx.MinInt(8, rc.MoveSteps+2))
 	for step := 1; step <= steps; step++ {
 		if st, ok := s.Env.RuntimeStatus(info.UID); ok && (st.RobotType == 2 || st.RobotType == 3 || st.StateName != robotcap.RuntimeStateRunning) {
@@ -157,6 +166,25 @@ func (s MoveService) AutoMove(info robotcap.Info, rc robotconfig.RuntimeConfig, 
 		}
 	}
 	return nil
+}
+
+// transitRefused reports whether a map may not even be crossed. The standing
+// cap decides where robots are placed; the transit ceiling above it decides the
+// wall a moving robot actually meets, and the two differ on purpose: an area at
+// its standing count is still walkable, because the robots in it are leaving
+// again.
+func (s MoveService) transitRefused(village, area int) bool {
+	policy := robotspawn.CrowdPolicy(s.Env)
+	if policy == nil {
+		return false
+	}
+	held := 0
+	for _, st := range s.Env.RuntimeStatusMap() {
+		if st.Village == village && st.Area == area {
+			held++
+		}
+	}
+	return robotspawn.CrowdTransitFull(policy, village, area, held)
 }
 
 func (s MoveService) followTarget(info robotcap.Info, target FollowTarget, rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem) (int, int) {

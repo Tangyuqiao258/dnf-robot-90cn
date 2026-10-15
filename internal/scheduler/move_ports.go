@@ -46,6 +46,14 @@ func (e moveActionEnv) LoadMapCatalog() []shared.MapCatalogItem {
 	return e.manager.loadMapCatalog()
 }
 
+// CrowdMapRule carries the world's per-map population policy into the move
+// capability, which probes for it. A robot walking somewhere reads the same
+// rule a robot being placed reads, so an area the operator closed cannot be
+// reached by walking instead of by spawning.
+func (e moveActionEnv) CrowdMapRule(village, area int) shared.CrowdMapRule {
+	return e.manager.crowdMapRule(village, area)
+}
+
 func (e moveActionEnv) RandBetween(min, max int) int {
 	return e.manager.randBetween(min, max)
 }

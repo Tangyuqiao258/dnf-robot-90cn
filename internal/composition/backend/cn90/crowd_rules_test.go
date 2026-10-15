@@ -48,8 +48,8 @@ func TestCrowdRulesPinStallsToTheirMapRole(t *testing.T) {
 		maxRobots int
 	}{
 		{name: "main city gate enchants and may fill", village: 39, area: 0, wantKind: shared.ExpertJobStoreEnchant, wantMax: crowdStallPerMap, exempt: true, hostsAny: true},
-		{name: "seria exit enchants once", village: 38, area: 0, wantKind: shared.ExpertJobStoreEnchant, wantMax: crowdStallPerMap, hostsAny: true},
-		{name: "dungeon entrance disassembles once", village: 38, area: 1, wantKind: shared.ExpertJobStoreDisjoint, wantMax: crowdStallPerMap, hostsAny: true},
+		{name: "seria exit enchants once and gathers a crowd", village: 38, area: 0, wantKind: shared.ExpertJobStoreEnchant, wantMax: crowdStallPerMap, exempt: true, hostsAny: true},
+		{name: "dungeon entrance disassembles once and gathers a crowd", village: 38, area: 1, wantKind: shared.ExpertJobStoreDisjoint, wantMax: crowdStallPerMap, exempt: true, hostsAny: true},
 		{name: "ordinary square disassembles freely", village: 38, area: 3, wantKind: shared.ExpertJobStoreDisjoint, wantMax: shared.CrowdStallUnlimited, hostsAny: true},
 	}
 	for _, tc := range cases {
@@ -148,14 +148,66 @@ func TestCrowdRulesDistanceClosesFarMaps(t *testing.T) {
 	}
 }
 
+// TestCrowdRulesSingleDoorMapsAreRoads pins the operator's own reading of a
+// road: a map with one door is a road, whether that door leads across a town
+// border or back into the square the robot came from, while a dungeon entrance
+// with one door keeps the role its gate gives it.
+func TestCrowdRulesSingleDoorMapsAreRoads(t *testing.T) {
+	rules := NewCrowdRules(crowdTestWorld())
+	for _, tc := range []struct {
+		name     string
+		village  int
+		area     int
+		wantRole CrowdMapRole
+	}{
+		{"a square behind one door is a road", 39, 2, CrowdRoleConnector},
+		{"an outpost behind one door is a road", 38, 4, CrowdRoleConnector},
+		{"a dungeon entrance behind one door keeps its gate", 38, 1, CrowdRoleDungeonEntrance},
+		{"a square with two doors is a place", 39, 1, CrowdRoleNormal},
+		{"a square that leads on and back is a place", 38, 3, CrowdRoleNormal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if role := rules.Role(tc.village, tc.area); role != tc.wantRole {
+				t.Fatalf("%d/%d role = %s, want %s", tc.village, tc.area, role, tc.wantRole)
+			}
+		})
+	}
+}
+
+// TestCrowdRulesGatheringPlacesAreTheOnesThatGather pins which maps the hot cap
+// covers: the maps a player stands in -- a village's landing square and a
+// dungeon gate -- and nothing else. A road is walked through, not stood in.
+func TestCrowdRulesGatheringPlacesAreTheOnesThatGather(t *testing.T) {
+	rules := NewCrowdRules(crowdTestWorld())
+	for _, tc := range []struct {
+		village int
+		area    int
+		want    bool
+	}{
+		{39, 0, true},  // the main town's gate square
+		{38, 0, true},  // a village's landing square
+		{38, 1, true},  // a dungeon gate
+		{39, 1, false}, // an ordinary square
+		{38, 3, false},
+		{38, 2, false}, // a road, whichever draw it took
+	} {
+		if got := rules.CrowdMapRule(tc.village, tc.area).CrowdExempt; got != tc.want {
+			t.Fatalf("%d/%d gathering = %t, want %t", tc.village, tc.area, got, tc.want)
+		}
+	}
+}
+
 func TestCrowdRulesRoleCounts(t *testing.T) {
 	counts := NewCrowdRules(crowdTestWorld()).RoleCounts()
 	want := map[CrowdMapRole]int{
-		CrowdRoleNormal:          4,
+		// 39/1 and 38/3 are the only maps with two doors; 39/2, 38/2 and 38/4
+		// are roads, the first and last of them because one door is all they
+		// have.
+		CrowdRoleNormal:          2,
 		CrowdRoleSeriaExit:       1,
 		CrowdRoleMainCityGate:    1,
 		CrowdRoleDungeonEntrance: 1,
-		CrowdRoleConnector:       1,
+		CrowdRoleConnector:       3,
 	}
 	for role, count := range want {
 		if counts[role] != count {

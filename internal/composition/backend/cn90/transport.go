@@ -47,18 +47,50 @@ func (t *ActionTransport) Open(ctx context.Context, uid int, request shared.Open
 		_ = session.Close()
 		return err
 	}
-	if request.InitialTownKnown {
-		t.mu.Lock()
-		status := t.status[uid]
-		status.Village = request.InitialVillage
-		status.Area = request.InitialArea
-		status.X = request.InitialX
-		status.Y = request.InitialY
-		t.status[uid] = status
-		t.locationKnown[uid] = true
-		t.mu.Unlock()
-	}
+	t.seedLoginLocation(uid, session, request)
 	return nil
+}
+
+// seedLoginLocation records where the character stands after a login.
+//
+// The requested InitialTown* values are a wish: the server re-opens its own
+// login location for every character-list login and honours the assigned town
+// only as a second step it may refuse. Seeding the wish made the location map
+// claim a town the character was not in, which sent a same-town move as a bare
+// position report for a scene the character was absent from and named the wrong
+// source town in every later cross-town portal request. The session's own
+// observation is the answer; the request stays the fallback for a session that
+// observed nothing, so this never reports less than the transport knew before.
+func (t *ActionTransport) seedLoginLocation(uid int, session shared.RobotSession, request shared.OpenSessionRequest) {
+	if !request.InitialTownKnown {
+		return
+	}
+	village, area, x, y := request.InitialVillage, request.InitialArea, request.InitialX, request.InitialY
+	landing, observed := loginLanding{}, false
+	if reporter, ok := session.(interface {
+		LoginLanding() (loginLanding, bool)
+	}); ok {
+		landing, observed = reporter.LoginLanding()
+	}
+	if observed {
+		village, area, x, y = landing.village, landing.area, landing.x, landing.y
+		if village != request.InitialVillage || area != request.InitialArea {
+			foundationlog.Robotf("[CN90_LOCATION_SEED_OBSERVED] uid=%d requested=%d/%d/%d,%d landed=%d/%d/%d,%d\n",
+				uid, request.InitialVillage, request.InitialArea, request.InitialX, request.InitialY, village, area, x, y)
+		}
+	} else {
+		foundationlog.Robotf("[CN90_LOCATION_SEED_UNOBSERVED] uid=%d requested=%d/%d/%d,%d\n",
+			uid, request.InitialVillage, request.InitialArea, request.InitialX, request.InitialY)
+	}
+	t.mu.Lock()
+	status := t.status[uid]
+	status.Village = village
+	status.Area = area
+	status.X = x
+	status.Y = y
+	t.status[uid] = status
+	t.locationKnown[uid] = true
+	t.mu.Unlock()
 }
 
 func (t *ActionTransport) Attach(uid int, session shared.RobotSession) error {

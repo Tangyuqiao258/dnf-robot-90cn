@@ -71,6 +71,7 @@ func DistributedTargets(env RangeRandom, maps []shared.MapCatalogItem, levels []
 	out := make([]BalancedTarget, len(levels))
 	for _, outputIndex := range order {
 		level := levels[outputIndex]
+		floorAreas := underFloorMapIndexes(candidates, areaCounts, level, policy)
 		emptyAreas := eligibleMapIndexes(candidates, areaCounts, level, true, policy)
 		eligible := emptyAreas
 		if len(emptyAreas) == 0 {
@@ -81,9 +82,12 @@ func DistributedTargets(env RangeRandom, maps []shared.MapCatalogItem, levels []
 		}
 
 		chosen := 0
-		if len(emptyAreas) > 0 {
+		switch {
+		case len(floorAreas) > 0:
+			chosen = randomIndex(env, floorAreas)
+		case len(emptyAreas) > 0:
 			chosen = randomIndex(env, emptyAreas)
-		} else {
+		default:
 			chosen = leastLoadedMapIndex(env, candidates, eligible, areaCounts)
 		}
 
@@ -99,6 +103,36 @@ func DistributedTargets(env RangeRandom, maps []shared.MapCatalogItem, levels []
 		out[outputIndex] = BalancedTarget{Map: candidate.mp, X: x, Y: y}
 	}
 	return out, true
+}
+
+// underFloorMapIndexes returns the maps that already hold robots and want more
+// before they reach the floor their rules give them. The floor is what decides
+// whether a world gets coverage or crowds: at one, a map takes its first robot
+// and waits while the empty maps are covered; at five, a map keeps taking
+// robots until it looks inhabited, and the maps the fleet has not reached yet
+// stay empty.
+func underFloorMapIndexes(candidates []mapCandidate, counts map[shared.MapAreaKey]int, level int, policy shared.CrowdMapPolicy) []int {
+	if policy == nil {
+		return nil
+	}
+	under := make([]int, 0, len(candidates))
+	for index, candidate := range candidates {
+		if candidate.mp.Level > level {
+			continue
+		}
+		held := counts[mapAreaKey(candidate.mp)]
+		if held <= 0 {
+			continue
+		}
+		if CrowdFloor(policy, candidate.mp.Village, candidate.mp.Area) <= held {
+			continue
+		}
+		if CrowdOccupied(policy, candidate.mp.Village, candidate.mp.Area, held) {
+			continue
+		}
+		under = append(under, index)
+	}
+	return under
 }
 
 func BalancedLocation(env RangeRandom, maps []shared.MapCatalogItem, level int, locations []shared.MapLocation) (BalancedTarget, bool) {
@@ -374,6 +408,18 @@ func BalancedFamilyLocation(env RangeRandom, maps []shared.MapCatalogItem, level
 			indexes[index] = index
 		}
 		return targetFrom(stations[randomIndex(env, indexes)])
+	}
+
+	// The floor next: a map that already holds robots keeps taking them until it
+	// reaches the count its rules give it. At a floor of one this asks for
+	// nothing and the coverage below runs as it always did; a higher floor is
+	// the operator trading coverage for towns that look inhabited.
+	all := make([]mapCandidate, 0, len(maps))
+	for _, group := range order {
+		all = append(all, group.candidates...)
+	}
+	if under := underFloorMapIndexes(all, areaCounts, level, policy); len(under) > 0 {
+		return targetFrom(all[randomIndex(env, under)])
 	}
 
 	// Coverage first: every enterable map should hold robots before any map

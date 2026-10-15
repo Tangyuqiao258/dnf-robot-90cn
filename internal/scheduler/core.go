@@ -301,13 +301,69 @@ func (m *RobotManager) SetCrowdMapPolicy(policy shared.CrowdMapPolicy) {
 	m.crowdPolicy = policy
 }
 
+// operatorAreaPolicy reads the operator's world-wide population policy from the
+// live runtime configuration: the villages no robot may enter, how many robots
+// one area may hold and how many more may pass through. Reading the file here,
+// on every rule lookup, is what makes an edit land without a restart -- the
+// configuration's own poll publishes it within a second.
+func (m *RobotManager) operatorAreaPolicy() shared.CrowdAreaPolicy {
+	if m == nil {
+		return shared.CrowdAreaPolicy{}
+	}
+	rc := m.loadRobotConfig()
+	// The distance walk belongs to the backend's own policy rather than to the
+	// overlay, because only the backend knows the town graph the walk runs on.
+	// It is pushed here, on the same read that takes the rest of the policy, so
+	// an operator edit reaches it without a restart.
+	if setter, ok := m.crowdPolicy.(playerMapDistanceSetter); ok {
+		setter.SetPlayerMapDistance(rc.PlayerMapDistance)
+	}
+	// The junction cap is the backend's too: only the backend knows which maps
+	// its catalog derived as roads between two towns.
+	if setter, ok := m.crowdPolicy.(junctionMaxSetter); ok {
+		setter.SetJunctionMaxRobots(rc.JunctionMaxRobots)
+	}
+	return shared.CrowdAreaPolicy{
+		ClosedVillages: rc.ForbiddenVillages,
+		MaxPerArea:     rc.MaxRobotsPerArea,
+		TransitSlots:   rc.CrowdTransitSlots,
+		MinPerArea:     rc.MinRobotsPerArea,
+		HotPerArea:     rc.HotAreaMaxRobots,
+	}
+}
+
+// playerMapDistanceSetter is the part of a crowd policy that owns how far from
+// the player robots may stand.
+type playerMapDistanceSetter interface {
+	SetPlayerMapDistance(limit int)
+}
+
+// junctionMaxSetter is the part of a crowd policy that owns how many robots a
+// connector mini-map may hold.
+type junctionMaxSetter interface {
+	SetJunctionMaxRobots(limit int)
+}
+
 // crowdMapRule returns the crowd rule of one map, or the unrestricted rule when
-// the backend installed no policy.
+// the backend installed no policy. The operator's area policy is laid over the
+// world's own rule here, at the one point every placement, movement and stall
+// decision reads through, so no caller can see a map the operator closed.
 func (m *RobotManager) crowdMapRule(village, area int) shared.CrowdMapRule {
 	if m == nil || m.crowdPolicy == nil {
 		return shared.CrowdMapRule{}
 	}
-	return m.crowdPolicy.CrowdMapRule(village, area)
+	rule := m.crowdPolicy.CrowdMapRule(village, area)
+	return m.operatorAreaPolicy().Apply(village, area, rule)
+}
+
+// crowdPolicyView exposes the manager's rules as a policy of their own, for the
+// callers that take the policy itself rather than asking the manager per map.
+// It applies the same overlay, so a holder of the view cannot bypass the
+// operator's area policy.
+type crowdPolicyView struct{ manager *RobotManager }
+
+func (v crowdPolicyView) CrowdMapRule(village, area int) shared.CrowdMapRule {
+	return v.manager.crowdMapRule(village, area)
 }
 
 // crowdStallAllows reports whether a robot of one kind may open its stall in a
@@ -317,7 +373,7 @@ func (m *RobotManager) crowdStallAllows(village, area int, kind shared.ExpertJob
 	if m == nil || m.crowdPolicy == nil {
 		return true
 	}
-	rule := m.crowdPolicy.CrowdMapRule(village, area)
+	rule := m.crowdMapRule(village, area)
 	return rule.AllowsStall(kind, m.crowdStallHeld(village, area, kind))
 }
 
@@ -704,11 +760,19 @@ type playerMapDistancePolicy interface {
 // level: the row's village and area range, on a map that is in use and whose own
 // level limit the robot meets.
 //
-// The crowd rule is deliberately not consulted. A resident row is the operator
-// saying how many robots stand here; a policy that closes a map once the player
-// walks away would otherwise empty the one crowd the operator asked to keep.
+// The world's own crowd rule is deliberately not consulted. A resident row is
+// the operator saying how many robots stand here; a policy that closes a map
+// once the player walks away would otherwise empty the one crowd the operator
+// asked to keep.
+//
+// The operator's own closed list is consulted, and only it. "Never stand in the
+// wedding room" is a decision about the world, not about how far the player has
+// walked, so a row that names a closed village names nothing at all.
 func (m *RobotManager) residentMaps(row robotconfig.ResidentRow, level int) []shared.MapCatalogItem {
 	if m == nil {
+		return nil
+	}
+	if m.operatorAreaPolicy().ClosesVillage(row.Village) {
 		return nil
 	}
 	maps := m.loadMapCatalog()

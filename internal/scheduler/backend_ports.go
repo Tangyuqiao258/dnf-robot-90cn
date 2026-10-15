@@ -135,7 +135,13 @@ func (d protocolSessionDriver) PrepareOnline(info robotcap.Info, rc robotconfig.
 	if strings.TrimSpace(rc.FollowAccount) != "" {
 		d.manager.applyConfiguredLocation(&info, rc, maps)
 	}
-	spawnMaps := robotspawn.NormalMaps(maps)
+	// The maps a robot may be repaired onto are the ones the crowd rules still
+	// admit. Without the filter a character left standing in a village the
+	// operator closed -- the guild hall, the wedding room -- keeps that position
+	// through every login, because the check below only asks whether the map is
+	// usable and uncrowded, and a scene is both. A robot parked in a place no
+	// player expects to meet one is exactly what the closure is there to stop.
+	spawnMaps := robotspawn.AdmittedMaps(spawnEnv{manager: d.manager}, robotspawn.NormalMaps(maps))
 	if len(spawnMaps) == 0 {
 		spawnMaps = maps
 	}
@@ -168,7 +174,7 @@ func (d protocolSessionDriver) PrepareOnline(info robotcap.Info, rc robotconfig.
 		if !crowded {
 			// Mirror instances count as one logical map: a family can be
 			// over-full even when every single instance looks acceptable.
-			crowded = robotspawn.Crowded(spawnMaps, locations, info.Village, info.Area, spawnCrowdFloor, spawnCrowdBias, d.manager.crowdPolicy)
+			crowded = robotspawn.Crowded(spawnMaps, locations, info.Village, info.Area, spawnCrowdFloor, spawnCrowdBias, crowdPolicyView{manager: d.manager})
 		}
 	}
 	if valid && !crowded {

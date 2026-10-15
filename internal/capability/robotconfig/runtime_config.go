@@ -1,10 +1,10 @@
 package robotconfig
 
 type RuntimeConfig struct {
-	LevelMin                 int    `json:"level_min"`
-	LevelMax                 int    `json:"level_max"`
-	LevelPlan                string `json:"level_plan"`
-	PoolSize                 int    `json:"pool_size"`
+	LevelMin  int    `json:"level_min"`
+	LevelMax  int    `json:"level_max"`
+	LevelPlan string `json:"level_plan"`
+	PoolSize  int    `json:"pool_size"`
 	// Demand (需求) policy. The fleet is no longer "the first N robots in uid
 	// order": ResidentPlan names the maps a standing crowd always occupies, and
 	// the robots that follow the player fill the rest of the online budget. An
@@ -13,6 +13,56 @@ type RuntimeConfig struct {
 	ResidentPlan         string `json:"resident_plan"`
 	DemandPlayerPollSec  int    `json:"demand_player_poll_sec"`
 	DemandPlayerGraceSec int    `json:"demand_player_grace_sec"`
+	// ForbiddenVillages names the villages no robot may enter or spawn in. They
+	// are not towns the fleet is meant to visit -- the guild hall, the
+	// screenshot and configuration scenes, the wedding room, the dream Seria
+	// room -- and a robot standing in one is a robot in a place no player
+	// expects to meet one. An empty list closes nothing.
+	ForbiddenVillages []int `json:"forbidden_villages"`
+	// MaxRobotsPerArea is how many robots one single area may hold as a standing
+	// crowd, whatever role the map plays. Zero leaves the world's own per-map
+	// rules alone.
+	//
+	// It is applied on top of those rules rather than instead of them, which is
+	// why it also clears the density exemption: an area the operator capped at N
+	// is capped at N, and a map allowed to grow past it would make the number
+	// meaningless. The gathering places are the one exception -- HotAreaMaxRobots
+	// covers them instead and they keep the exemption, so they stay the busiest
+	// maps in the world without being uncapped.
+	MaxRobotsPerArea int `json:"max_robots_per_area"`
+	// HotAreaMaxRobots is how many robots a gathering place may hold: the maps a
+	// village's characters land in and the maps dungeon gates open on. A player
+	// stands in those rather than walking past them, so they are worth more
+	// robots than an ordinary area -- but the client draws every character in
+	// sight, so the number is a ceiling and not a wish. It is read on its own,
+	// whether or not MaxRobotsPerArea is set, and a value that does not exceed
+	// MaxRobotsPerArea leaves the gathering places under the ordinary cap. Zero
+	// turns the hot cap off.
+	HotAreaMaxRobots int `json:"hot_area_max_robots"`
+	// CrowdTransitSlots is how many robots beyond MaxRobotsPerArea an area still
+	// lets through. The fleet moves, so a couple of passers-by are gone again in
+	// a moment; without the allowance a full area would turn into a wall and the
+	// robots behind it would look stuck rather than busy.
+	CrowdTransitSlots int `json:"crowd_transit_slots"`
+	// PlayerMapDistance is how many town transitions from the player still take
+	// robots; maps farther away are closed. It trades against the online target:
+	// a fleet spread over a whole world is not a crowd anybody sees, but a fleet
+	// penned into a few rings of maps cannot reach its own target however many
+	// robots it owns. Zero turns the walk off and opens the world.
+	PlayerMapDistance int `json:"player_map_distance"`
+	// MinRobotsPerArea is how many robots one area wants before an empty one
+	// takes its first. It trades against how much of the world the fleet can
+	// cover: a fleet spread one robot deep over every map of the world never
+	// looks like a crowd anywhere, while a fleet that fills one map at a time
+	// leaves the maps it has not reached yet empty. Zero keeps the old
+	// behaviour, where every enterable map holds a robot before any map holds
+	// two.
+	MinRobotsPerArea int `json:"min_robots_per_area"`
+	// JunctionMaxRobots is how many robots a connector mini-map may hold: the
+	// small maps that exist to link two towns and hold nothing else. They are
+	// roads rather than squares, so the fleet barely touches them, but an empty
+	// road is a road nobody walks. Zero makes a junction an ordinary area again.
+	JunctionMaxRobots        int    `json:"junction_max_robots"`
 	Jobs                     []int  `json:"jobs"`
 	GrowTypes                []int  `json:"grow_types"`
 	ReconcileAwakening       bool   `json:"reconcile_awakening"`
@@ -210,9 +260,9 @@ type RuntimeConfig struct {
 	// as a mass disconnect to the server's login path.
 	SchedulerOfflineReleaseBatch  int `json:"scheduler_offline_release_batch"`
 	SchedulerOfflineReleaseGapSec int `json:"scheduler_offline_release_gap_sec"`
-	SystemActorPollMS              int `json:"system_actor_poll_ms"`
-	SystemManualActionTimeoutSec   int `json:"system_manual_action_timeout_sec"`
-	SystemPacketRatePerSec         int `json:"system_packet_rate_per_sec"`
+	SystemActorPollMS             int `json:"system_actor_poll_ms"`
+	SystemManualActionTimeoutSec  int `json:"system_manual_action_timeout_sec"`
+	SystemPacketRatePerSec        int `json:"system_packet_rate_per_sec"`
 }
 
 func Clone(rc RuntimeConfig) RuntimeConfig {

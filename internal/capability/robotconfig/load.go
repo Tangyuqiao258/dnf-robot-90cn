@@ -209,6 +209,13 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.ResidentPlan = dec.String("demand", "resident_plan", rc.ResidentPlan)
 	rc.DemandPlayerPollSec = dec.Int("demand", "player_poll_sec", rc.DemandPlayerPollSec)
 	rc.DemandPlayerGraceSec = dec.Int("demand", "player_grace_sec", rc.DemandPlayerGraceSec)
+	rc.ForbiddenVillages = dec.IntList("demand", "forbidden_villages", rc.ForbiddenVillages)
+	rc.MaxRobotsPerArea = dec.Int("demand", "max_robots_per_area", rc.MaxRobotsPerArea)
+	rc.HotAreaMaxRobots = dec.Int("demand", "hot_area_max_robots", rc.HotAreaMaxRobots)
+	rc.CrowdTransitSlots = dec.Int("demand", "crowd_transit_slots", rc.CrowdTransitSlots)
+	rc.PlayerMapDistance = dec.Int("demand", "player_map_distance", rc.PlayerMapDistance)
+	rc.MinRobotsPerArea = dec.Int("demand", "min_robots_per_area", rc.MinRobotsPerArea)
+	rc.JunctionMaxRobots = dec.Int("demand", "junction_max_robots", rc.JunctionMaxRobots)
 
 	rc.SystemActorPollMS = dec.Int("system", "actor_poll_ms", rc.SystemActorPollMS)
 	rc.SystemManualActionTimeoutSec = dec.Int("system", "manual_action_timeout_sec", rc.SystemManualActionTimeoutSec)

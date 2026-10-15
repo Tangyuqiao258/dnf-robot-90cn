@@ -69,6 +69,37 @@ func Default() RuntimeConfig {
 		SchedulerRecycleCooldownSec: 600, SchedulerOnlineBreakerPauseSec: 60, SchedulerCreateBatchSize: 10, SchedulerScaleDownBatch: 15,
 		SchedulerOfflineReleaseBatch: 5, SchedulerOfflineReleaseGapSec: 5,
 		DemandPlayerPollSec: 5, DemandPlayerGraceSec: 600,
+		// Villages no robot may enter or spawn in. Every one of them is a scene
+		// rather than a town the fleet is meant to walk through: the guild hall
+		// (8, areas 0..12), the screenshot scene (36), the configuration scene
+		// (37), the wedding room (101) and the dream Seria room (111, areas 0..9).
+		// They are closed by shared.CrowdAreaPolicy, the same rule that caps an
+		// area, so both decisions are read from one policy.
+		ForbiddenVillages: []int{8, 36, 37, 101, 111},
+		// One area holds fifteen robots standing, plus the two that are only
+		// passing through.
+		MaxRobotsPerArea:  15,
+		CrowdTransitSlots: 2,
+		// Twenty robots in a village's landing square or at a dungeon gate: an
+		// ordinary area's fifteen is what a player walks past, these are where the
+		// player stands, so they are worth a few more bodies. The ceiling is what
+		// keeps the square busy instead of stuttering, so it stays close to the
+		// ordinary cap rather than far above it.
+		HotAreaMaxRobots: 20,
+		// The distance walk is off: the fleet's online target is the number the
+		// operator asked the world to hold, and penning the fleet into the few
+		// rings of maps around the player would cap it well below that. Set a
+		// positive number to bring the walk back.
+		PlayerMapDistance: 0,
+		// One robot per map to begin with: the fleet covers the world before any
+		// map takes a second robot, which is what the spreading always did. A
+		// higher floor trades that coverage for towns that look inhabited -- at
+		// three hundred robots a floor of five fills about sixty maps and leaves
+		// the rest of the world empty -- so the operator sets it, not the world.
+		MinRobotsPerArea: 1,
+		// Two robots on a road between two towns: enough that the road is walked
+		// without the road becoming a square of its own.
+		JunctionMaxRobots: 2,
 		SystemActorPollMS: 3000, SystemManualActionTimeoutSec: 60, SystemPacketRatePerSec: 20,
 	}
 }

@@ -182,6 +182,27 @@ func validateRuntimeConfig(dec *foundationconfig.Decoder, rc RuntimeConfig) erro
 	}
 	checkRange("demand", "player_poll_sec", rc.DemandPlayerPollSec, 1, 300)
 	checkRange("demand", "player_grace_sec", rc.DemandPlayerGraceSec, 0, 86400)
+	// Village ids travel as one byte on the wire, so a list naming anything
+	// outside 1..255 could never close a map a robot can actually stand in.
+	checkListRange("demand", "forbidden_villages", rc.ForbiddenVillages, 1, 255)
+	// Zero means "leave the world's own per-map rules alone", which is why the
+	// floor is zero rather than one.
+	checkRange("demand", "max_robots_per_area", rc.MaxRobotsPerArea, 0, 10000)
+	// Zero turns the hot cap off and leaves the gathering places under the
+	// ordinary one. A value at or below max_robots_per_area has no effect either,
+	// but it is accepted rather than rejected: the two numbers answer different
+	// questions and an operator may set either one first.
+	checkRange("demand", "hot_area_max_robots", rc.HotAreaMaxRobots, 0, 10000)
+	checkRange("demand", "crowd_transit_slots", rc.CrowdTransitSlots, 0, 1000)
+	// Zero is "no walk at all", so the floor is zero and the ceiling is a walk
+	// deeper than any town graph the catalog can produce.
+	checkRange("demand", "player_map_distance", rc.PlayerMapDistance, 0, 64)
+	// A floor above the per-area cap could never be reached, so it is rejected
+	// rather than silently ignored. Zero is "no floor at all".
+	checkRange("demand", "min_robots_per_area", rc.MinRobotsPerArea, 0, 10000)
+	dec.Check("demand", "min_robots_per_area", rc.MaxRobotsPerArea <= 0 || rc.MinRobotsPerArea <= rc.MaxRobotsPerArea, "must not be greater than max_robots_per_area")
+	// Zero makes a junction an ordinary area, which is why the floor is zero.
+	checkRange("demand", "junction_max_robots", rc.JunctionMaxRobots, 0, 10000)
 
 	checkRange("system", "actor_poll_ms", rc.SystemActorPollMS, 100, 10000)
 	checkRange("system", "manual_action_timeout_sec", rc.SystemManualActionTimeoutSec, 1, 3600)

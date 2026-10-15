@@ -92,6 +92,52 @@ func TestBalancedFamilyLocationFillsEmptyAreasFirst(t *testing.T) {
 	}
 }
 
+// floorEnv is a world whose maps all want three robots before an empty map
+// opens. The floor arrives the way the operator's does, laid over whatever rule
+// the world derived for the map.
+type floorEnv struct {
+	zeroRandom
+	floor int
+}
+
+func (e floorEnv) CrowdMapRule(village, area int) shared.CrowdMapRule {
+	rule := stationEnv{}.CrowdMapRule(village, area)
+	rule.MinRobots = e.floor
+	return rule
+}
+
+func TestBalancedFamilyLocationFillsToFloorBeforeCoveringEmptyMaps(t *testing.T) {
+	maps := mirrorMaps()
+	env := floorEnv{floor: 3}
+	var locations []shared.MapLocation
+	counts := map[shared.MapAreaKey]int{}
+	place := func() shared.MapAreaKey {
+		t.Helper()
+		target, ok := BalancedFamilyLocation(env, maps, 80, locations, shared.MapAreaKey{}, shared.ExpertJobStoreNone)
+		if !ok {
+			t.Fatal("BalancedFamilyLocation returned no target")
+		}
+		key := shared.MapAreaKey{Village: target.Map.Village, Area: target.Map.Area}
+		counts[key]++
+		locations = append(locations, shared.MapLocation{Village: key.Village, Area: key.Area, X: target.X, Y: target.Y})
+		return key
+	}
+	first := place()
+	for index := 0; index < env.floor-1; index++ {
+		if got := place(); got != first {
+			t.Fatalf("robot %d went to %v while %v was still below its floor of %d", index+2, got, first, env.floor)
+		}
+	}
+	if len(counts) != 1 {
+		t.Fatalf("%d areas hold robots, want 1: the floor was not reached before the world was covered", len(counts))
+	}
+	// The first area now holds its floor, so the next robot is the one that
+	// opens a new map.
+	if got := place(); got == first {
+		t.Fatalf("area %v took a fourth robot at a floor of %d instead of covering an empty map", first, env.floor)
+	}
+}
+
 func TestBalancedFamilyLocationDoesNotMultiplyMirrorInstances(t *testing.T) {
 	maps := mirrorMaps()
 	// One robot per area completes coverage; the mirror family now holds ten

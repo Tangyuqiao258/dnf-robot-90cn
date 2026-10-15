@@ -21,3 +21,8 @@ func FilterGenericAreaMaps(maps []MapCatalogItem, guildID int) []MapCatalogItem 
 	}
 	return out
 }
+
+// The operator's closed-village and per-area population policy lives in
+// CrowdAreaPolicy (crowd.go) rather than here. A village is closed by the same
+// rule that caps an area, so the world has one policy to read instead of a
+// catalog rewrite plus a rule table that could disagree with each other.

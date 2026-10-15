@@ -53,6 +53,13 @@ const expertJobStoreAckTimeout = 8 * time.Second
 // an assigned town differing from the home town uses.
 const crossTownPresenceTimeout = 6 * time.Second
 
+// loginPresenceTimeout is the login presence's own budget. It used to share the
+// login's single timeout with the handshake, the roster, the character select
+// and the scene-ready exchange, so a login that spent its time earlier left the
+// confirmation a second or two and a merely late answer was read as a refused
+// spawn.
+const loginPresenceTimeout = 12 * time.Second
+
 // initialTownRouteTimeout bounds the wait for the initial town transition
 // (class0/op24) after the op143 checkpoint is sent.
 const initialTownRouteTimeout = 15 * time.Second
@@ -82,6 +89,10 @@ type Session struct {
 	// behind it in the current town scene, so the entry re-reports this before
 	// it opens the selector.
 	townPosition *townPositionState
+	// loginLanding is the town the server actually opened this session in. The
+	// transport seeds its location map from it, because the town the open
+	// request asked for is only a wish the server may have refused.
+	loginLanding loginLanding
 	// reviveQueue carries death notices to the revive worker. It is nil unless
 	// the session was opened with EnableDungeonRevive, which is what keeps the
 	// observer from queueing work nobody will send.
@@ -143,19 +154,24 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 		}
 	}()
 
+	// The login is the only reader the socket has until the drain loop starts.
+	// The observer keeps the area notifications this sequence reads past, so
+	// the scene the server opened the character in is not lost before the
+	// assigned-town exchange can ask about it.
+	observer := &loginObserver{}
 	if _, err := client.CompleteHandshakeFrom(openCtx, first); err != nil {
 		return nil, fmt.Errorf("90CN login: %w", err)
 	}
 	if err := client.RequestRoster(openCtx); err != nil {
 		return nil, err
 	}
-	if _, err := waitUpperPacket(openCtx, client, protocol.ClassNotice, protocol.NotiCharacterList); err != nil {
+	if _, err := readUntilPacket(openCtx, client, observer, protocol.ClassNotice, protocol.NotiCharacterList); err != nil {
 		return nil, fmt.Errorf("90CN roster: %w", err)
 	}
 	if err := client.SelectCharacter(openCtx, request.CharacterSlot); err != nil {
 		return nil, err
 	}
-	selectPacket, err := waitUpperPacket(openCtx, client, protocol.ClassCommand, protocol.ResponseSelect)
+	selectPacket, err := readUntilPacket(openCtx, client, observer, protocol.ClassCommand, protocol.ResponseSelect)
 	if err != nil {
 		return nil, fmt.Errorf("90CN select character: %w", err)
 	}
@@ -169,7 +185,7 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	if err := client.ProgressInitialTown(openCtx); err != nil {
 		return nil, err
 	}
-	if _, err := waitUpperPacket(openCtx, client, protocol.ClassNotice, protocol.NotiSceneTransition); err != nil {
+	if _, err := readUntilPacket(openCtx, client, observer, protocol.ClassNotice, protocol.NotiSceneTransition); err != nil {
 		return nil, fmt.Errorf("90CN initial town: %w", err)
 	}
 	// The live client acknowledges the first typed op24 with legacy 1345
@@ -179,16 +195,16 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	if err := client.TownSceneReady(openCtx); err != nil {
 		foundationlog.Robotf("CN90_SCENE_READY_FAILED err=%v\n", err)
 	}
-	townPositionKnown := false
+	landing := loginLanding{}
 	if request.InitialTownKnown {
-		if err := initializeTownPresence(openCtx, client, request); err != nil {
+		observed, err := initializeTownPresence(openCtx, client, observer, request)
+		if err != nil {
 			// The persisted login location is owned by the server. A spawn
 			// request that does not match it is rejected server-side; keep the
 			// session online instead of failing the whole login.
 			foundationlog.Robotf("CN90_TOWN_PRESENCE_DEFERRED err=%v\n", err)
-		} else {
-			townPositionKnown = true
 		}
+		landing = observed
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	session := &Session{
@@ -197,14 +213,15 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 		chatReplies: request.ChatReplies, chatReplyEnabled: request.EnableChatReply,
 		trade: &tradeState{}, tradeEnabled: request.EnableTrade,
 		tradeOfferStacks: request.TradeOfferStacks, tradeOfferCount: request.TradeOfferCount,
+		loginLanding: landing,
 	}
-	// The entry presence above reported a coordinate with op36, which is a
-	// scene transition rather than a coordinate report: the server accepts it
-	// but keeps no op35 position for the new scene. Recording it is still what
-	// the entry has to re-report, because it is where the character stands.
-	if townPositionKnown {
+	// The entry presence above re-entered the scene with op36, which is a scene
+	// transition rather than a coordinate report: the server accepts it but
+	// keeps no op35 position for the new scene. Recording it is still what the
+	// entry has to re-report, because it is where the character stands.
+	if landing.known {
 		session.townPosition = &townPositionState{}
-		session.townPosition.mark(int16(request.InitialX), int16(request.InitialY), 0, 0)
+		session.townPosition.mark(int16(landing.x), int16(landing.y), 0, 0)
 	}
 	if request.EnablePartyAutoAccept {
 		session.startPartyAutoAccept(runCtx)
@@ -250,65 +267,159 @@ func (f SessionFactory) dialBound(ctx context.Context, accountName string, first
 	return client, nil
 }
 
-func initializeTownPresence(ctx context.Context, client *protocol.Client, request shared.OpenSessionRequest) error {
+// loginLanding is the town the server actually opened a session in.
+//
+// The town in the open request is a wish, not a fact. A character-list login
+// re-opens the server's own login location first and the assigned town is a
+// second step the server may refuse, so the area notification the server sends
+// is the only honest answer to "where does this character stand". The transport
+// seeds its location map from it; seeding the request instead made every later
+// move compare against a town the character was not standing in.
+type loginLanding struct {
+	village int
+	area    int
+	x       int
+	y       int
+	known   bool
+}
+
+// loginObserver keeps the area notifications the login sequence reads on its way
+// to the packets it is waiting for. The login is the only reader the socket has
+// until the drain loop starts, and the server announces the scene it opened the
+// character in before the assigned-town exchange begins, so a wait that only
+// looked for its own packet would drop the landing on the floor.
+type loginObserver struct {
+	landing loginLanding
+}
+
+func (o *loginObserver) absorb(packet protocol.Packet) {
+	if o == nil {
+		return
+	}
+	if landing, ok := landingFromPacket(packet); ok {
+		o.landing = landing
+	}
+}
+
+// landingFromPacket reads one NotiUserArea body: village, area and two
+// little-endian int16 coordinates, the same shape an area transition confirms
+// on.
+func landingFromPacket(packet protocol.Packet) (loginLanding, bool) {
+	if packet.Class != protocol.ClassNotice || packet.Type != protocol.NotiUserArea || len(packet.Body) < 8 {
+		return loginLanding{}, false
+	}
+	return loginLanding{
+		village: int(packet.Body[2]),
+		area:    int(packet.Body[3]),
+		x:       int(int16(binary.LittleEndian.Uint16(packet.Body[4:6]))),
+		y:       int(int16(binary.LittleEndian.Uint16(packet.Body[6:8]))),
+		known:   true,
+	}, true
+}
+
+// initializeTownPresence requests the assigned town and returns the town the
+// server actually opened the character in. The landing is returned even when
+// the request was refused, because the caller has to record where the character
+// stands rather than where it was asked to stand.
+func initializeTownPresence(ctx context.Context, client *protocol.Client, observer *loginObserver, request shared.OpenSessionRequest) (loginLanding, error) {
 	if request.InitialVillage < 0 || request.InitialVillage > 255 || request.InitialArea < 0 || request.InitialArea > 255 {
-		return fmt.Errorf("90CN initial town out of range: %d/%d", request.InitialVillage, request.InitialArea)
+		return loginLanding{}, fmt.Errorf("90CN initial town out of range: %d/%d", request.InitialVillage, request.InitialArea)
 	}
 	if request.InitialX < math.MinInt16 || request.InitialX > math.MaxInt16 || request.InitialY < math.MinInt16 || request.InitialY > math.MaxInt16 {
-		return fmt.Errorf("90CN initial town position out of range: %d,%d", request.InitialX, request.InitialY)
+		return loginLanding{}, fmt.Errorf("90CN initial town position out of range: %d,%d", request.InitialX, request.InitialY)
+	}
+	// The presence gets a budget of its own instead of the login's remainder.
+	// The handshake, the roster, the character select and the scene-ready
+	// exchange all spend from the same login timeout, so a login that was slow
+	// earlier left this wait a second or two and a merely late answer was read
+	// as a refused town.
+	presenceCtx, cancelPresence := context.WithTimeout(ctx, loginPresenceTimeout)
+	defer cancelPresence()
+	// The landing the login sequence already saw stands until something later
+	// replaces it.
+	var landing loginLanding
+	if observer != nil {
+		landing = observer.landing
 	}
 	// An assigned town that differs from the server-side home town must be
 	// requested with the cross-town portal shape, otherwise the server answers
 	// with a blocked event and the robot stays on its home route until the
 	// first move relocates it.
 	if request.HomeVillage > 0 && request.HomeVillage != request.InitialVillage {
-		portalCtx, cancel := context.WithTimeout(ctx, crossTownPresenceTimeout)
+		portalCtx, cancelPortal := context.WithTimeout(presenceCtx, crossTownPresenceTimeout)
 		sendErr := client.SetUserAreaPortal(portalCtx, byte(request.InitialVillage), byte(request.InitialArea),
 			int16(request.InitialX), int16(request.InitialY), 5, uint16(request.HomeVillage))
+		observed, confirmed := loginLanding{}, false
 		if sendErr == nil {
-			if confirmErr := waitTownPresence(portalCtx, client, request); confirmErr == nil {
-				cancel()
-				return nil
-			}
+			observed, confirmed, _ = waitTownPresence(portalCtx, client, request)
 		}
-		cancel()
+		cancelPortal()
+		if observed.known {
+			landing = observed
+		}
+		if confirmed {
+			return landing, nil
+		}
 	}
-	if err := client.SetUserArea(ctx, byte(request.InitialVillage), byte(request.InitialArea), int16(request.InitialX), int16(request.InitialY), 5); err != nil {
-		return fmt.Errorf("90CN enter town: %w", err)
+	if err := client.SetUserArea(presenceCtx, byte(request.InitialVillage), byte(request.InitialArea), int16(request.InitialX), int16(request.InitialY), 5); err != nil {
+		return landing, fmt.Errorf("90CN enter town: %w", err)
 	}
-	if err := waitTownPresence(ctx, client, request); err != nil {
-		return fmt.Errorf("90CN enter town confirmation: %w", err)
+	observed, confirmed, err := waitTownPresence(presenceCtx, client, request)
+	if observed.known {
+		landing = observed
 	}
-	return nil
+	if confirmed {
+		return landing, nil
+	}
+	if err == nil {
+		err = context.DeadlineExceeded
+	}
+	return landing, fmt.Errorf("90CN enter town confirmation: %w", err)
 }
 
 // waitTownPresence waits for the area notification that confirms the requested
-// town/area/position.
-func waitTownPresence(ctx context.Context, client *protocol.Client, request shared.OpenSessionRequest) error {
+// town and area, and reports where the character stands either way.
+//
+// The two answers are separate because the login needs both: whether the
+// request was honoured, and the landing. A notification naming another town is
+// not an error -- the server owns the login location and simply refused -- so
+// the last one seen is returned alongside the failure. Only the town and the
+// area have to match: the server picks the entry pixel inside the map, so
+// demanding the requested coordinate made every confirmation time out on a
+// presence the server had in fact accepted.
+func waitTownPresence(ctx context.Context, client *protocol.Client, request shared.OpenSessionRequest) (loginLanding, bool, error) {
+	var landing loginLanding
 	for {
 		packet, err := client.Read(ctx)
 		if err != nil {
-			return err
+			return landing, false, err
 		}
-		if packet.Class != protocol.ClassNotice || packet.Type != protocol.NotiUserArea || len(packet.Body) < 8 {
+		observed, ok := landingFromPacket(packet)
+		if !ok {
 			continue
 		}
-		if int(packet.Body[2]) != request.InitialVillage || int(packet.Body[3]) != request.InitialArea ||
-			int16(binary.LittleEndian.Uint16(packet.Body[4:6])) != int16(request.InitialX) ||
-			int16(binary.LittleEndian.Uint16(packet.Body[6:8])) != int16(request.InitialY) {
-			continue
+		landing = observed
+		if observed.village == request.InitialVillage && observed.area == request.InitialArea {
+			return landing, true, nil
 		}
-		return nil
 	}
 }
 
-// waitUpperPacket reads packets until one matches the class and type.
+// waitUpperPacket reads packets until one matches the class and type. It is the
+// login-free form of readUntilPacket.
 func waitUpperPacket(ctx context.Context, client *protocol.Client, class byte, typ uint16) (protocol.Packet, error) {
+	return readUntilPacket(ctx, client, nil, class, typ)
+}
+
+// readUntilPacket reads packets until one matches the class and type, handing
+// every area notification it passes to observer.
+func readUntilPacket(ctx context.Context, client *protocol.Client, observer *loginObserver, class byte, typ uint16) (protocol.Packet, error) {
 	for {
 		packet, err := client.Read(ctx)
 		if err != nil {
 			return protocol.Packet{}, err
 		}
+		observer.absorb(packet)
 		if packet.Class == class && packet.Type == typ {
 			return packet, nil
 		}
@@ -525,6 +636,18 @@ func (s *Session) CharacterID() int {
 		return 0
 	}
 	return int(s.selfCharacterID)
+}
+
+// LoginLanding reports the town the server actually opened this session in.
+// The transport seeds its location map from it: the town in the open request is
+// a wish the server may have refused, and a location map seeded from the wish
+// sends a later cross-town move with the wrong source town. A session that
+// never saw an area notification reports false.
+func (s *Session) LoginLanding() (loginLanding, bool) {
+	if s == nil || !s.loginLanding.known {
+		return loginLanding{}, false
+	}
+	return s.loginLanding, true
 }
 
 // setTerminationCallback keeps session lifecycle notification inside the
