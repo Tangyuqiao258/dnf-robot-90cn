@@ -1073,6 +1073,31 @@ func (m *RobotManager) currentFollowTarget(uid int, rc robotconfig.RuntimeConfig
 	if target, ok := m.partyLeaderFollowTarget(uid); ok {
 		return target, true
 	}
+	// A pinned robot answers to its pin and to nothing else. The demand layer
+	// owns follow_account -- pollPlayer reads it, fillFloatingLayer places the
+	// budget on the rings around it, and demandLocationFor is the pin that
+	// comes out. Reading the account here as well made it a second, rule-free
+	// implementation of the same intent: accountFollowTarget names the follow
+	// account's village and draws an area from that whole village at random, so
+	// it ignored the rings, the per-map cap, the resident rows and the level
+	// mix, and it outranked the pin.
+	//
+	// The 2026-10-16 lab run is what that costs. The demand layer logged
+	// `demand_plan resident=65 floating=135 desired=200 shedding=0 player=38/1`
+	// -- every online robot pinned, 65 of them to the three villages the
+	// operator named -- while populationReport found no robot at any of those
+	// three and 297 of 300 in the one village the follow account sat in. Login
+	// applied the pins; the first AutoMove tick walked them off. 98 robots ended
+	// up in a single area, and each of their area transitions fanned out to all
+	// 98.
+	//
+	// Returning no target instead sends the move down AutoMove's plain branch,
+	// whose randomTarget draws only inside the robot's own village and area --
+	// the pin's area -- so a pinned robot wanders where the operator put it and
+	// stays there.
+	if _, ok := m.demandLocationFor(uid); ok {
+		return robotaction.FollowTarget{}, false
+	}
 	return m.accountFollowTarget(rc, maps)
 }
 

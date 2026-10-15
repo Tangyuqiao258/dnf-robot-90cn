@@ -70,6 +70,35 @@ func TestCurrentFollowTargetRejectsAnEmptyLeaderID(t *testing.T) {
 	}
 }
 
+// A pinned robot is the demand layer's placement, and the account-follow
+// target is not allowed to overrule it: without this guard the first AutoMove
+// tick after login walks every pinned robot to the follow account's village,
+// which is how 65 robots pinned to three named villages ended up in the one the
+// account sat in (2026-10-16 lab run, `demand_plan ... player=38/1`).
+func TestCurrentFollowTargetLeavesAPinnedRobotOnItsPin(t *testing.T) {
+	m := testRobotManagerWithConfig(t, "[follow]\nfollow_account = dnf:test-account\n")
+	m.SetBackendActionTransport(&leaderFollowTransport{ok: false})
+	m.SetBackendFollowAccountLocator(&followAccountTestLocator{village: 38})
+	t.Cleanup(func() { _ = m.Shutdown() })
+
+	// Unpinned, the account target is live: the guard below is what removes it,
+	// not a lookup that never resolves.
+	target, ok := m.currentFollowTarget(7, m.loadRobotConfig(), nil)
+	if !ok {
+		t.Fatal("follow account produced no target for an unpinned robot")
+	}
+	if target.Village != 38 {
+		t.Fatalf("unpinned target village = %d want 38", target.Village)
+	}
+
+	m.setDemandLocations(map[int]demandLocation{
+		7: {village: 39, area: 0, x: 1700, y: 155},
+	})
+	if pinned, ok := m.currentFollowTarget(7, m.loadRobotConfig(), nil); ok {
+		t.Fatalf("pinned robot got follow target %+v, want none", pinned)
+	}
+}
+
 func TestBackendPartyFollowEnabledRequiresCapabilityAndSwitch(t *testing.T) {
 	withParty := shared.BackendInfo{Capabilities: map[shared.BackendCapability]shared.CapabilityStatus{
 		shared.CapabilityParty: {Enabled: true},
