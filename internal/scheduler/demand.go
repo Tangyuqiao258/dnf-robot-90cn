@@ -154,6 +154,24 @@ func (s *RobotSupervisor) pollPlayer(now time.Time, rc robotconfig.RuntimeConfig
 		case err != nil:
 			robotLogf("[RobotSupervisor] demand_player_lookup_failed account=%s err=%v\n", account, err)
 		case ok && located.Available():
+			// The account is standing where no robot can: the shared Seria room
+			// every character-list login opens in, a dungeon, an event map.
+			// None of them are places to ring the floating layer around, and
+			// the room in particular is where an account that has never
+			// actually been played sits -- at the server's own new-character
+			// default. Taking that as the player's location would drag the
+			// whole floating layer onto one lobby map and empty the towns it
+			// was standing in. The last real location keeps its grace window
+			// instead, exactly as it does when the account cannot be found at
+			// all.
+			//
+			// An empty catalog means the map data is not loaded yet, which says
+			// nothing about where the player is, so the test is skipped rather
+			// than read as "nowhere".
+			maps := s.manager.loadMapCatalog()
+			if len(maps) > 0 && !robotspawn.HasUsableMap(maps, located.Village, located.Area) {
+				break
+			}
 			s.demand.mu.Lock()
 			changed := s.demand.player.Village != located.Village || s.demand.player.Area != located.Area
 			s.demand.player = located

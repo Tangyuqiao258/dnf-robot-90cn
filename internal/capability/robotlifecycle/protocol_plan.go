@@ -86,7 +86,17 @@ func BuildProtocolRobotPlans(options ProtocolPlanOptions) ([]ProtocolRobotPlan, 
 		if len(levelPool) > 0 {
 			level = levelPool[robotconfig.LevelPoolIndex(uid, options.Config.RobotUIDStart, len(levelPool))]
 		}
-		info := robotcap.Info{UID: uid, Level: level, Job: job, Port: 0, Village: options.Config.SpawnFallbackVillage, Area: options.Config.SpawnArea, X: options.Config.SpawnXMin, Y: options.Config.SpawnYMin}
+		// The fallback draws a point inside the configured box rather than its
+		// corner. Writing (SpawnXMin, SpawnYMin) gave every robot that fell
+		// through both branches below one identical pixel, which reads as a
+		// single stack rather than a crowd -- the same defect the store path's
+		// randomNormalPosition already avoids for the same config values.
+		info := robotcap.Info{
+			UID: uid, Level: level, Job: job, Port: 0,
+			Village: options.Config.SpawnFallbackVillage, Area: options.Config.SpawnArea,
+			X: env.RandBetween(options.Config.SpawnXMin, options.Config.SpawnXMax),
+			Y: env.RandBetween(options.Config.SpawnYMin, options.Config.SpawnYMax),
+		}
 		if options.Config.SpawnFixed {
 			// Fixed spawns are applied again at online time; keep the legacy
 			// catalog sample so the plan still carries a plausible position.

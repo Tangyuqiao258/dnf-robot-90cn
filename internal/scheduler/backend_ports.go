@@ -107,9 +107,33 @@ func (d protocolSessionDriver) PrepareOnline(info robotcap.Info, rc robotconfig.
 		return info
 	}
 	maps := d.manager.loadMapCatalog()
-	if rc.SpawnFixed || strings.TrimSpace(rc.FollowAccount) != "" {
+	if rc.SpawnFixed {
 		d.manager.applyConfiguredLocation(&info, rc, maps)
 		return info
+	}
+	// follow_account is the floating layer's setting, and the demand layer is
+	// what implements it: its pin is consulted above, and fillFloatingLayer
+	// places the rest of the budget on the rings around the player. Reading it
+	// here as well made it a blanket override instead -- with it set, every
+	// unpinned robot took the follow account's town as its login location and
+	// the crowd repair below never ran at all.
+	//
+	// That mattered because the server opens every character-list login in the
+	// shared Seria room (town 38/area 1), which is a lobby: the map catalog
+	// marks it use=false with no rectangles, and AutoMove targets the robot's
+	// own assigned area, so a robot whose assigned area is the room paces
+	// inside it and never leaves. The crowd repair is what moved the assignment
+	// off that map, and the room door -- which returns to the previous
+	// non-Seria location -- is what carried the robot out. A follow account
+	// whose most recently played character has never left the room (the
+	// server's new-character default, 38/1 at 450,234) collapsed the whole
+	// fleet onto the one map it cannot walk out of.
+	//
+	// The configured location is therefore applied as a preference and the
+	// crowd rules below still get their say: a follow town that is usable and
+	// not crowded is kept, and one that is either is repaired like any other.
+	if strings.TrimSpace(rc.FollowAccount) != "" {
+		d.manager.applyConfiguredLocation(&info, rc, maps)
 	}
 	spawnMaps := robotspawn.NormalMaps(maps)
 	if len(spawnMaps) == 0 {
