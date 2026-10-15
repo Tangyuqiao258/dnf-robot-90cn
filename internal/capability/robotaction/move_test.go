@@ -172,3 +172,75 @@ func TestAutoMoveRejectsCrossAreaFollowWithoutUsableGeometry(t *testing.T) {
 		t.Fatalf("invalid cross-area follow dispatched steps=%v", env.steps)
 	}
 }
+
+// The Seria room the server opens every login in is the one map a robot must
+// never wander: it has no geometry and no players. A robot standing in one walks
+// to a door instead, which is the only request shape the server answers from a
+// room it will not let anyone stay in.
+func TestAutoMoveWalksOutOfTheSeriaRoomThroughADoor(t *testing.T) {
+	env := &captureMoveEnv{}
+	service := MoveService{Env: env}
+	source := robotcap.Info{UID: 101, Village: 38, Area: 1, X: 450, Y: 234}
+	rc := robotconfig.RuntimeConfig{MoveSteps: 2, MoveSpeedMin: 100, MoveSpeedMax: 100}
+	maps := []shared.MapCatalogItem{
+		{Village: 38, Area: 1, Use: false, Links: []shared.MapAreaKey{{Village: 39, Area: 0}, {Village: 98, Area: 1}}},
+		{Village: 39, Area: 0, Use: true, Rectangles: []shared.MapRectangle{{XMin: 300, XMax: 360, YMin: 180, YMax: 220}}},
+		{Village: 98, Area: 1, Use: false, Rectangles: []shared.MapRectangle{{XMin: 300, XMax: 360, YMin: 180, YMax: 220}}},
+	}
+
+	if err := service.AutoMove(source, rc, maps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.steps) != 2 {
+		t.Fatalf("move steps = %d, want 2", len(env.steps))
+	}
+	for _, step := range env.steps {
+		if step.targetVillage != 39 || step.targetArea != 0 {
+			t.Fatalf("room escape target = %d/%d, want the usable door 39/0", step.targetVillage, step.targetArea)
+		}
+		if step.info.Village != source.Village || step.info.Area != source.Area {
+			t.Fatalf("room escape source was mutated: %+v", step.info)
+		}
+	}
+}
+
+func TestAutoMoveStaysWhenEveryDoorOutOfAnUnusableMapIsUnusable(t *testing.T) {
+	env := &captureMoveEnv{}
+	service := MoveService{Env: env}
+	source := robotcap.Info{UID: 101, Village: 38, Area: 1, X: 450, Y: 234}
+	rc := robotconfig.RuntimeConfig{MoveSteps: 2, MoveSpeedMin: 100, MoveSpeedMax: 100}
+	maps := []shared.MapCatalogItem{
+		{Village: 38, Area: 1, Use: false, Links: []shared.MapAreaKey{{Village: 98, Area: 1}, {Village: 99, Area: 0}}},
+		{Village: 98, Area: 1, Use: true, Level: 90, Rectangles: []shared.MapRectangle{{XMin: 300, XMax: 360, YMin: 180, YMax: 220}}},
+		{Village: 99, Area: 0, Use: false},
+	}
+
+	if err := service.AutoMove(source, rc, maps, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range env.steps {
+		if step.targetVillage != source.Village || step.targetArea != source.Area {
+			t.Fatalf("doorless room escape target = %d/%d", step.targetVillage, step.targetArea)
+		}
+	}
+}
+
+func TestAutoMoveKeepsWanderingItsOwnMapWhenThatMapIsAdmitted(t *testing.T) {
+	env := &captureMoveEnv{}
+	service := MoveService{Env: env}
+	source := robotcap.Info{UID: 101, Village: 39, Area: 8, X: 300, Y: 200}
+	rc := robotconfig.RuntimeConfig{MoveSteps: 2, MoveSpeedMin: 100, MoveSpeedMax: 100}
+	maps := []shared.MapCatalogItem{
+		{Village: 39, Area: 8, Use: true, Links: []shared.MapAreaKey{{Village: 39, Area: 0}}, Rectangles: []shared.MapRectangle{{XMin: 260, XMax: 340, YMin: 180, YMax: 230}}},
+		{Village: 39, Area: 0, Use: true, Rectangles: []shared.MapRectangle{{XMin: 100, XMax: 200, YMin: 100, YMax: 150}}},
+	}
+
+	if err := service.AutoMove(source, rc, maps, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range env.steps {
+		if step.targetVillage != source.Village || step.targetArea != source.Area {
+			t.Fatalf("admitted map wander target = %d/%d, want its own map", step.targetVillage, step.targetArea)
+		}
+	}
+}

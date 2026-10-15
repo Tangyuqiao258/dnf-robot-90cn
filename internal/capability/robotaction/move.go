@@ -136,6 +136,11 @@ func (s MoveService) AutoMove(info robotcap.Info, rc robotconfig.RuntimeConfig, 
 		targetInfo := info
 		targetInfo.Village, targetInfo.Area = targetVillage, targetArea
 		targetX, targetY = s.randomTarget(targetInfo, rc, maps)
+	} else if door, ok := s.strandedDoor(info, maps); ok {
+		targetVillage, targetArea = door.Village, door.Area
+		targetInfo := info
+		targetInfo.Village, targetInfo.Area = targetVillage, targetArea
+		targetX, targetY = s.randomTarget(targetInfo, rc, maps)
 	} else {
 		targetX, targetY = s.randomTarget(info, rc, maps)
 	}
@@ -166,6 +171,58 @@ func (s MoveService) AutoMove(info robotcap.Info, rc robotconfig.RuntimeConfig, 
 		}
 	}
 	return nil
+}
+
+// strandedDoor answers where a robot that stands in a map the catalog does not
+// admit should walk, instead of pacing inside that map.
+//
+// The server opens every character-list login in the shared Seria room, which
+// the catalog marks use=false with no rectangles: a robot told to wander its own
+// map circled inside that room for as long as the session lasted and never asked
+// to leave, so the room held a third of the fleet where no player can see it.
+// The way out of a map is one of its doors, and a map's own portal table is the
+// list of them. Choosing among those keeps the destination one the server
+// proves a route to: a destination drawn from the whole catalog can be a scene
+// the current town has no route to at all, and a request for one of those is
+// dropped without an answer, which is how a store round spent its whole retry
+// budget on village 98.
+func (s MoveService) strandedDoor(info robotcap.Info, maps []shared.MapCatalogItem) (shared.MapCatalogItem, bool) {
+	if robotspawn.HasUsableMap(maps, info.Village, info.Area) {
+		return shared.MapCatalogItem{}, false
+	}
+	var doors []shared.MapCatalogItem
+	for _, mp := range maps {
+		if mp.Village != info.Village || mp.Area != info.Area {
+			continue
+		}
+		for _, link := range mp.Links {
+			if door, ok := usableDoor(maps, link, info.Level); ok {
+				doors = append(doors, door)
+			}
+		}
+		break
+	}
+	doors = robotspawn.AdmittedMaps(s.Env, doors)
+	if len(doors) == 0 {
+		return shared.MapCatalogItem{}, false
+	}
+	return doors[s.Env.RandBetween(0, len(doors)-1)], true
+}
+
+// usableDoor resolves one portal entry into a map a robot may be sent to. A door
+// the catalog calls unusable, one above the robot's level, or one without
+// movement geometry is not a way out and stays out of the choice.
+func usableDoor(maps []shared.MapCatalogItem, link shared.MapAreaKey, level int) (shared.MapCatalogItem, bool) {
+	for _, mp := range maps {
+		if mp.Village != link.Village || mp.Area != link.Area {
+			continue
+		}
+		if mp.Use && mp.Level <= level && len(robotspawn.MapRectangles(mp)) > 0 {
+			return mp, true
+		}
+		return shared.MapCatalogItem{}, false
+	}
+	return shared.MapCatalogItem{}, false
 }
 
 // transitRefused reports whether a map may not even be crossed. The standing
