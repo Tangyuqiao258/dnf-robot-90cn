@@ -270,6 +270,31 @@ func (r *RobotRuntime) claimStorePoint(points *storecap.PointCoordinator, uid in
 	return points.ClaimForStoreWhere(uid, rc.AutoStoreDurationSec, allowed)
 }
 
+// storePointAllowed builds the filter one store round claims its point under:
+// the world's generic-area rule, plus the map's own crowd rule for the kind the
+// round is about to open.
+//
+// The crowd rule used to be consulted only after a point was claimed, and a map
+// that refused ended the whole round -- which is what the store failure counter
+// was mostly made of. A map that cannot host the kind is not a candidate at all,
+// so it is dropped before the claim rather than after it. The verdict is
+// memoized per map: one check per round, not one per candidate point.
+func (r *RobotRuntime) storePointAllowed(info robotcap.Info, kind shared.ExpertJobStoreKind) func(storecap.Position) bool {
+	allowed := make(map[shared.MapAreaKey]bool, 8)
+	return func(pos storecap.Position) bool {
+		if !shared.GenericAreaAllowed(info.GuildID, pos.Village) {
+			return false
+		}
+		key := shared.MapAreaKey{Village: pos.Village, Area: pos.Area}
+		verdict, seen := allowed[key]
+		if !seen {
+			verdict = r.manager.crowdStallAllows(pos.Village, pos.Area, kind)
+			allowed[key] = verdict
+		}
+		return verdict
+	}
+}
+
 func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, shouldStop func() bool) robotcap.ActionResult {
 	rc := r.Config()
 	kind := r.manager.expertJobStoreKindForUID(uid, rc)
@@ -301,7 +326,7 @@ func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, sh
 	var failureState storecap.AttemptFailureState
 	reuseSession := false
 	setAreaStalls := 0
-	allowedPosition := func(pos storecap.Position) bool { return shared.GenericAreaAllowed(info.GuildID, pos.Village) }
+	allowedPosition := r.storePointAllowed(info, kind)
 	// Adapters whose server cannot confirm cross-town transitions restrict the
 	// point pool to the robot's current town.
 	if placement, ok := r.manager.storePolicy.(shared.BackendStorePlacementPolicy); ok && placement.StoreSameTownOnly() {
@@ -324,8 +349,11 @@ func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, sh
 		// The trade belongs to the character, the market to the map: a robot
 		// keeps the expert job it was raised with, and a map hosts only the
 		// stalls its crowd rule allows, one apiece where the rule says so. The
-		// claim is released rather than reported, since the point itself is
-		// sound -- the map, not the coordinate, is what refused.
+		// pool filter above already drops every map the rule forbids, so a
+		// refusal here means another robot took the map's last slot between the
+		// claim and this check. The claim is released rather than reported,
+		// since the point itself is sound -- the map, not the coordinate, is
+		// what refused.
 		if !r.manager.crowdStallAllows(pos.Village, pos.Area, kind) {
 			robotLogf("[STORE_MAP_STALL_REFUSED] uid=%d cid=%d kind=%s point=%s village=%d area=%d\n",
 				uid, info.CID, kind.Name(), pos.PointID, pos.Village, pos.Area)
