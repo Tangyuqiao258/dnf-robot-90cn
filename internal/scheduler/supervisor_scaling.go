@@ -204,11 +204,18 @@ func (s *RobotSupervisor) acquireUIDs(rc robotconfig.RuntimeConfig, actors []*ac
 		robotLogf("[RobotSupervisor] select_robots_failed err=%v\n", err)
 		return nil
 	}
+	// With the demand layer on, the layer names the uids that may be online.
+	// Leasing anything else would log in a robot the layer is about to stand
+	// down, and the two would trade the same actors back and forth all day.
+	demanded := s.demandUIDs()
 	out := make([]actorLease, 0, len(actors))
 	nextActor := 0
 	for _, robot := range robots {
 		if nextActor >= len(actors) {
 			return out
+		}
+		if demanded != nil && !demanded[robot.UID] {
+			continue
 		}
 		actor := actors[nextActor]
 		if s.ledger.TryLeaseUID(robot.UID, actor) {
@@ -218,6 +225,12 @@ func (s *RobotSupervisor) acquireUIDs(rc robotconfig.RuntimeConfig, actors []*ac
 	}
 	need := len(actors) - nextActor
 	if need <= 0 {
+		return out
+	}
+	if demanded != nil {
+		// The layer picks its robots out of the pool by uid, so a robot that
+		// does not exist yet can never be one of them: growing the pool here
+		// would only buy actors the layer stands down again.
 		return out
 	}
 	target := robotconfig.TargetCapacity(rc)

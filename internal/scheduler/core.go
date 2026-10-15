@@ -12,6 +12,7 @@ import (
 
 	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
+	robotspawn "robot/internal/capability/robotspawn"
 	robotstate "robot/internal/capability/robotstate"
 	robottemplate "robot/internal/capability/robottemplate"
 	storecap "robot/internal/capability/store"
@@ -120,6 +121,8 @@ type RobotManager struct {
 	supervisor                      *RobotSupervisor
 	storePolicy                     shared.BackendStorePolicy
 	crowdPolicy                     shared.CrowdMapPolicy
+	demandPinMu                     lockhub.RWLocker
+	demandPins                      map[int]demandLocation
 	storeRuntime                    BackendStoreRuntime
 	expertJobProfessionWriter       BackendExpertJobProfessionWriter
 	serverNoticeTrigger             shared.ServerNoticer
@@ -127,6 +130,7 @@ type RobotManager struct {
 	serverNoticeMu                  lockhub.Locker
 	serverNoticeAreas               map[string]*serverNoticeAreaWindow
 	followAccountLocator            shared.FollowAccountLocator
+	playerLocator                   shared.PlayerLocator
 	accountOnlineChecker            shared.AccountOnlineChecker
 	storePointsCoord                *storecap.PointCoordinator
 	worldHornCache                  *storecap.WorldHornCache
@@ -445,6 +449,26 @@ func (m *RobotManager) SetBackendAccountOnlineChecker(checker shared.AccountOnli
 	m.accountOnlineChecker = checker
 }
 
+// SetBackendPlayerLocator installs the adapter's player-position lookup, which
+// is what lets the demand layer follow the human around the world.
+func (m *RobotManager) SetBackendPlayerLocator(locator shared.PlayerLocator) {
+	if m == nil {
+		return
+	}
+	m.playerLocator = locator
+}
+
+// locatePlayer reads where the follow account is playing. An adapter that
+// cannot answer returns ok=false rather than an error: the demand layer treats
+// "not found" and "not implemented" alike, as a floating layer with nothing to
+// follow.
+func (m *RobotManager) locatePlayer(account string) (shared.PlayerLocation, bool, error) {
+	if m == nil || m.playerLocator == nil {
+		return shared.PlayerLocation{}, false, nil
+	}
+	return m.playerLocator.LocatePlayer(context.Background(), account)
+}
+
 // lookupFollowAccountVillage queries the adapter for the follow account's last
 // played village. Without an adapter implementation the follow target is
 // unavailable.
@@ -599,6 +623,107 @@ func (m *RobotManager) robotLocations() ([]shared.MapLocation, error) {
 		return m.robotState.RobotLocations(context.Background())
 	}
 	return nil, errSchedulerStorageUnavailable
+}
+
+// demandLocation is where the demand layer pins one robot: the map it must be
+// logged in on and the point it starts from there.
+type demandLocation struct {
+	village int
+	area    int
+	x       int
+	y       int
+}
+
+// setDemandLocations replaces the pin table. A uid absent from the table keeps
+// whatever location the ordinary spawn rules give it, so an empty table is the
+// fleet's unmanaged behaviour rather than "everyone at 0/0".
+func (m *RobotManager) setDemandLocations(pins map[int]demandLocation) {
+	if m == nil {
+		return
+	}
+	m.demandPinMu.Lock()
+	m.demandPins = pins
+	m.demandPinMu.Unlock()
+}
+
+// demandLocationFor reports where the demand layer pinned one robot.
+//
+// A pin is what the ordinary spawn path cannot express: the repair sweep is
+// free to move a robot off a map the operator asked it to stand on, because its
+// only inputs are the map catalog's capacity rules. A pinned robot is the
+// operator's word, so the placement layer applies the pin first and returns.
+func (m *RobotManager) demandLocationFor(uid int) (demandLocation, bool) {
+	if m == nil || uid <= 0 {
+		return demandLocation{}, false
+	}
+	m.demandPinMu.RLock()
+	defer m.demandPinMu.RUnlock()
+	pin, ok := m.demandPins[uid]
+	return pin, ok
+}
+
+// setPlayerMap tells the world's crowd policy which map the player is on, so the
+// maps far from it stop taking robots and the demand layer knows what "near the
+// player" means. A backend whose policy has no notion of the player ignores it.
+func (m *RobotManager) setPlayerMap(village, area int) {
+	if m == nil {
+		return
+	}
+	if setter, ok := m.crowdPolicy.(playerMapPolicy); ok {
+		setter.SetPlayerMap(village, area)
+	}
+}
+
+// playerMapDistances reports how many transitions every map sits from the
+// player's town. A backend without the notion returns nothing, which the caller
+// reads as "no map is out of reach".
+func (m *RobotManager) playerMapDistances() map[shared.MapAreaKey]int {
+	if m == nil {
+		return nil
+	}
+	if provider, ok := m.crowdPolicy.(playerMapDistancePolicy); ok {
+		return provider.MapDistances()
+	}
+	return nil
+}
+
+// playerMapPolicy is the part of a crowd policy that tracks the player.
+type playerMapPolicy interface {
+	SetPlayerMap(village, area int)
+}
+
+// playerMapDistancePolicy is the part of a crowd policy that reports the walk
+// it computed outward from the player's town.
+type playerMapDistancePolicy interface {
+	MapDistances() map[shared.MapAreaKey]int
+}
+
+// residentMaps lists the maps one resident row may use for a robot of the given
+// level: the row's village and area range, on a map that is in use and whose own
+// level limit the robot meets.
+//
+// The crowd rule is deliberately not consulted. A resident row is the operator
+// saying how many robots stand here; a policy that closes a map once the player
+// walks away would otherwise empty the one crowd the operator asked to keep.
+func (m *RobotManager) residentMaps(row robotconfig.ResidentRow, level int) []shared.MapCatalogItem {
+	if m == nil {
+		return nil
+	}
+	maps := m.loadMapCatalog()
+	out := make([]shared.MapCatalogItem, 0, len(maps))
+	for _, mp := range maps {
+		if mp.Village != row.Village || mp.Area < row.AreaMin || mp.Area > row.AreaMax {
+			continue
+		}
+		if !mp.Use || mp.Level > level {
+			continue
+		}
+		if len(robotspawn.MapRectangles(mp)) == 0 {
+			continue
+		}
+		out = append(out, mp)
+	}
+	return out
 }
 
 // rememberRobotLocation records an intended location in the robot directory so

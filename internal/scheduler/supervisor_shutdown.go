@@ -31,6 +31,10 @@ func (s *RobotSupervisor) shutdownActors() error {
 		forceGrace = timeout / 2
 	}
 
+	// An offline-release batch closes sessions in the background; let it finish
+	// before the fleet is drained out from under it.
+	s.waitForOfflineReleaseSweep(forceGrace)
+
 	deadline := time.Now().Add(timeout)
 	gracefulDeadline := deadline.Add(-forceGrace)
 	actors := s.ledger.BeginDrainAllActors()

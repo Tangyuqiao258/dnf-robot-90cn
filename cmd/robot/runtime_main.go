@@ -92,6 +92,9 @@ func runBackend(cfg *config.SysConfig, paths layout.Paths, info shared.BackendIn
 	manager.SetBackendExpertJobProfessionWriter(bundle.Loadouts)
 	manager.SetBackendAccountOnlineChecker(bundle.Transport)
 	manager.SetBackendFollowAccountLocator(bundle.FollowAccounts)
+	// The same adapter knows where the player is standing, which is what the
+	// demand layer's floating robots follow.
+	manager.SetBackendPlayerLocator(bundle.FollowAccounts)
 	manager.SetBackendRobotCreator(info, bundle.Creator)
 	manager.SetRobotStateDirectory(bundle.State)
 	manager.SetBackendActionTransport(bundle.Transport)

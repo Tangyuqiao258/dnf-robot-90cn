@@ -66,6 +66,16 @@ func (a *Actor) setOnlineDesired(v bool) {
 	a.stateMu.Unlock()
 }
 
+// SetOnlineDesired is the demand layer's lever on one actor: an actor the layer
+// no longer wants online stops being re-established, drops to offline, and is
+// then released by the supervisor's throttled sweep. It deliberately does not
+// log out by itself -- a whole layer turning over at once is a disconnect storm
+// against the server's login path -- so the caller sets the flag and lets the
+// sweep pace the real logouts.
+func (a *Actor) SetOnlineDesired(v bool) {
+	a.setOnlineDesired(v)
+}
+
 func (a *Actor) onlineDesiredValue() bool {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()

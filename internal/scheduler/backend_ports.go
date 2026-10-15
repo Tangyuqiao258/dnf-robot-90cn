@@ -96,6 +96,16 @@ const (
 )
 
 func (d protocolSessionDriver) PrepareOnline(info robotcap.Info, rc robotconfig.RuntimeConfig) robotcap.Info {
+	// The operator's plan outranks every other placement rule. A pinned robot
+	// logs in exactly where the plan put it, and the crowd rules -- which only
+	// read the map catalog and would happily repair a resident crowd off the map
+	// the operator asked for -- do not get a say.
+	if pin, ok := d.manager.demandLocationFor(info.UID); ok {
+		info.Village, info.Area = pin.village, pin.area
+		info.X, info.Y = pin.x, pin.y
+		d.manager.rememberRobotLocation(info.UID, info.Village, info.Area, info.X, info.Y)
+		return info
+	}
 	maps := d.manager.loadMapCatalog()
 	if rc.SpawnFixed || strings.TrimSpace(rc.FollowAccount) != "" {
 		d.manager.applyConfiguredLocation(&info, rc, maps)

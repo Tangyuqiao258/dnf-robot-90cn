@@ -36,8 +36,10 @@ const (
 	// crowdStallPerMap is how many expert-job stalls one map hosts: enchanting
 	// stalls on a Seria exit, disassembler stalls at a dungeon entrance.
 	crowdStallPerMap = 1
-	// crowdPlayerMapDistance closes maps this many transitions from the player
-	// or further: the world only has to look alive near the player.
+	// crowdPlayerMapDistance is how many transitions from the player the world
+	// still has to look alive: maps farther than this close. "切换三次以内" is the
+	// operator's rule, and it has to agree with the floating layer's own reach or
+	// the layer would pin robots onto maps the crowd rules refuse.
 	crowdPlayerMapDistance = 3
 	// crowdMainCityVillage is Hendon Myre, the main town. Its Seria-exit map is
 	// the one the fleet may fill.
@@ -131,7 +133,7 @@ func (r *CrowdRules) CrowdMapRule(village, area int) shared.CrowdMapRule {
 	if r == nil {
 		return shared.CrowdMapRule{}
 	}
-	if distance, known := r.distanceOf(shared.MapAreaKey{Village: village, Area: area}); known && distance >= crowdPlayerMapDistance {
+	if distance, known := r.distanceOf(shared.MapAreaKey{Village: village, Area: area}); known && distance > crowdPlayerMapDistance {
 		return shared.CrowdMapRule{Closed: true}
 	}
 	switch r.Role(village, area) {
@@ -166,46 +168,59 @@ func (r *CrowdRules) CrowdMapRule(village, area int) shared.CrowdMapRule {
 	return shared.CrowdMapRule{}
 }
 
-// SetPlayerTown records the town the player was last seen in and recomputes how
-// far every map sits from it. Maps at or beyond crowdPlayerMapDistance stop
-// taking robots. A town of zero (player unknown) clears the restriction.
+// SetPlayerMap records the map the player was last seen on and recomputes how
+// far every map sits from it. Maps farther than crowdPlayerMapDistance stop
+// taking robots, because a player three transitions out is still around the
+// corner while a player four out is in another part of the world.
 //
-// Only the town is known from the follow account, never the exact map, so the
-// walk starts from every map of that town at once.
-func (r *CrowdRules) SetPlayerTown(village int) {
+// The walk starts from the player's own map, not from their whole town: a town
+// is thirty-odd maps, and a crowd spread one robot deep over all of them is not
+// a crowd the player ever sees. A village of zero (player unknown) clears the
+// restriction.
+//
+// A map the catalog does not describe keeps the previous seed rather than
+// clearing it. A player inside a dungeon instance is the normal case -- the
+// instance is not a town map -- and emptying the world for the ten minutes they
+// spend in one would be visible from the outside.
+func (r *CrowdRules) SetPlayerMap(village, area int) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.playerKey = shared.MapAreaKey{Village: village}
+	if village > 0 {
+		if _, known := r.roles[shared.MapAreaKey{Village: village, Area: area}]; !known {
+			return
+		}
+	}
+	r.playerKey = shared.MapAreaKey{Village: village, Area: area}
 	r.recomputeLocked()
 }
 
-// PlayerTown reports the town the walk currently starts from.
-func (r *CrowdRules) PlayerTown() int {
+// PlayerMap reports the map the walk currently starts from, or 0/0 when none
+// does.
+func (r *CrowdRules) PlayerMap() (village, area int) {
 	if r == nil {
-		return 0
+		return 0, 0
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.playerKey.Village
+	return r.playerKey.Village, r.playerKey.Area
 }
 
-// recomputeLocked walks the town graph outward from the player's town.
+// recomputeLocked walks the town graph outward from the player's map.
 func (r *CrowdRules) recomputeLocked() {
 	r.distance = nil
 	if r.playerKey.Village <= 0 {
 		return
 	}
+	if _, known := r.roles[r.playerKey]; !known {
+		return
+	}
 	distance := make(map[shared.MapAreaKey]int, len(r.roles))
 	queue := make([]shared.MapAreaKey, 0, len(r.roles))
-	for key := range r.roles {
-		if key.Village == r.playerKey.Village {
-			distance[key] = 0
-			queue = append(queue, key)
-		}
-	}
+	distance[r.playerKey] = 0
+	queue = append(queue, r.playerKey)
 	for len(queue) > 0 {
 		key := queue[0]
 		queue = queue[1:]
@@ -237,13 +252,19 @@ func (r *CrowdRules) distanceOf(key shared.MapAreaKey) (int, bool) {
 }
 
 // MapDistances returns the distance of every map the walk reached, for
-// diagnostics.
+// diagnostics and for the floating layer, which fills the near rings first.
+//
+// No walk means nothing: the caller reads an empty answer as "no map is in
+// reach", and a nil one as "this world has no notion of reach at all".
 func (r *CrowdRules) MapDistances() map[shared.MapAreaKey]int {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.distance == nil {
+		return nil
+	}
 	out := make(map[shared.MapAreaKey]int, len(r.distance))
 	for key, distance := range r.distance {
 		out[key] = distance

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	actormodel "robot/internal/actor"
@@ -157,7 +158,54 @@ func (s *RobotSupervisor) recycleActorUID(actor *actormodel.Actor, status actorm
 // operator logged out (onlineDesired=false while still holding a UID). Without
 // this sweep the slot keeps its UID forever and the target online count can
 // never recover without a process restart.
-func (s *RobotSupervisor) recycleDesiredOfflineAutoActors() {
+//
+// The sweep runs one bounded batch at a time, off the tick, with a pause before
+// the next. Each release is a real logout that waits for the session to close,
+// so releasing a whole layer inside one tick would both stall the supervisor and
+// hand the server a disconnect storm in the middle of its own login fill. The
+// pause is the pace the demand layer turns its population over at, and the
+// batch is what keeps that pace from depending on how many robots changed
+// places at once.
+func (s *RobotSupervisor) recycleDesiredOfflineAutoActors(now time.Time, rc robotconfig.RuntimeConfig) {
+	s.releaseMu.Lock()
+	if s.releaseRunning || now.Before(s.releaseNext) {
+		s.releaseMu.Unlock()
+		return
+	}
+	batch := s.desiredOfflineAutoActors(robotconfig.OfflineReleaseBatch(rc))
+	if len(batch) == 0 {
+		s.releaseMu.Unlock()
+		return
+	}
+	s.releaseRunning = true
+	done := make(chan struct{})
+	s.releaseDone = done
+	gap := robotconfig.OfflineReleaseGap(rc)
+	s.releaseMu.Unlock()
+
+	go func() {
+		defer close(done)
+		for _, actor := range batch {
+			s.releaseDesiredOfflineActor(actor)
+		}
+		s.releaseMu.Lock()
+		s.releaseRunning = false
+		if s.releaseDone == done {
+			s.releaseDone = nil
+		}
+		s.releaseNext = time.Now().Add(gap)
+		s.releaseMu.Unlock()
+	}()
+}
+
+// desiredOfflineAutoActors lists the actors a batch should log out, oldest slot
+// first, so a plan that has to shed more than one batch sheds the same slots
+// first every time instead of picking a different set each sweep.
+func (s *RobotSupervisor) desiredOfflineAutoActors(limit int) []*actormodel.Actor {
+	if limit <= 0 {
+		return nil
+	}
+	var candidates []*actormodel.Actor
 	for _, actor := range s.ledger.AutoActorPointers() {
 		snapshot := actor.Snapshot()
 		if snapshot.Mode != actormodel.ModeAuto || snapshot.UID <= 0 {
@@ -166,14 +214,45 @@ func (s *RobotSupervisor) recycleDesiredOfflineAutoActors() {
 		if snapshot.OnlineDesired || snapshot.State != actormodel.StateOffline {
 			continue
 		}
-		robotLogf("[RobotSupervisor] recycle_offline_auto slot=%d uid=%d\n", snapshot.SlotID, snapshot.UID)
-		released := actor.ReleaseAndWait(10 * time.Second)
-		if released != snapshot.UID {
-			robotLogf("[RobotSupervisor] recycle_offline_auto_deferred slot=%d uid=%d released=%d\n",
-				snapshot.SlotID, snapshot.UID, released)
-			continue
-		}
-		s.ledger.RemoveLeaseIfActor(released, actor)
+		candidates = append(candidates, actor)
+	}
+	if len(candidates) <= limit {
+		return candidates
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].SlotIDValue() < candidates[j].SlotIDValue()
+	})
+	return candidates[:limit]
+}
+
+func (s *RobotSupervisor) releaseDesiredOfflineActor(actor *actormodel.Actor) {
+	snapshot := actor.Snapshot()
+	if snapshot.UID <= 0 {
+		return
+	}
+	robotLogf("[RobotSupervisor] recycle_offline_auto slot=%d uid=%d\n", snapshot.SlotID, snapshot.UID)
+	released := actor.ReleaseAndWait(10 * time.Second)
+	if released != snapshot.UID {
+		robotLogf("[RobotSupervisor] recycle_offline_auto_deferred slot=%d uid=%d released=%d\n",
+			snapshot.SlotID, snapshot.UID, released)
+		return
+	}
+	s.ledger.RemoveLeaseIfActor(released, actor)
+}
+
+// waitForOfflineReleaseSweep blocks until the in-flight batch has finished. The
+// shutdown path calls it so a release cannot still be closing sessions while the
+// fleet is being torn down.
+func (s *RobotSupervisor) waitForOfflineReleaseSweep(timeout time.Duration) {
+	s.releaseMu.Lock()
+	done := s.releaseDone
+	s.releaseMu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
 	}
 }
 

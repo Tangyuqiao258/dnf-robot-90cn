@@ -582,11 +582,11 @@ const petEggNameMarker = "宠物蛋"
 
 // PetRenderable reports whether a catalog item may be worn as a creature.
 //
-// The egg filter is the operator's: the 90CN client crashes when an unhatched
-// 宠物蛋 is placed in the creature slot, which is exactly the slot a type-30
-// item is written to. A hatched creature carries the same type and the same
-// table, so the name is the only thing that separates the two, and a draw that
-// ignores it hands the client a crash at login.
+// The egg filter is the operator's: the client crashes when an unhatched 宠物蛋
+// is placed in the creature slot, which is exactly the slot a type-30 item is
+// written to. A hatched creature carries the same type and the same table, so
+// the name is the only thing that separates the two, and a draw that ignores it
+// hands the client a crash at login.
 func PetRenderable(item shared.EquipmentCatalogItem) bool {
 	if item.ID <= 0 || item.Expire || item.GrantBlocked {
 		return false

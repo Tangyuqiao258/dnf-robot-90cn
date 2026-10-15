@@ -370,9 +370,9 @@ func TestSelectPetChoosesPartialArtifactSet(t *testing.T) {
 	}
 }
 
-// TestSelectPetSkipsUnhatchedEggs covers the operator's crash report: the 90CN
-// client dies when an unhatched 宠物蛋 reaches the creature slot, and the catalog
-// files those eggs under the very same item type as the real creatures.
+// TestSelectPetSkipsUnhatchedEggs covers the operator's crash report: the client
+// dies when an unhatched 宠物蛋 reaches the creature slot, and the catalog files
+// those eggs under the very same item type as the real creatures.
 func TestSelectPetSkipsUnhatchedEggs(t *testing.T) {
 	items := []shared.EquipmentCatalogItem{
 		{ID: 63006, ItemType: 30, Name: "宠物蛋 (佛拉斯)"},

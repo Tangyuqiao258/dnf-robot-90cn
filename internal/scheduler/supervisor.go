@@ -30,6 +30,11 @@ type RobotSupervisor struct {
 	pressureRunning bool
 	pressureDone    chan struct{}
 
+	releaseMu      lockhub.Locker
+	releaseRunning bool
+	releaseDone    chan struct{}
+	releaseNext    time.Time
+
 	nextMetrics      time.Time
 	nextGameGateLog  time.Time
 	nextLeaseHealth  time.Time
@@ -38,6 +43,11 @@ type RobotSupervisor struct {
 	createNext       time.Time
 	quarantineLogAt  map[int]time.Time
 	recycleCooldown  map[int]time.Time
+
+	// demand is the layer that decides who is online and where they stand.
+	// A zero value is the fleet's plain behaviour: nothing pinned, everyone the
+	// online fill reaches stays.
+	demand demandMemory
 }
 
 func NewRobotSupervisor(manager *RobotManager, runtime actormodel.RobotRuntime) *RobotSupervisor {
@@ -122,10 +132,14 @@ func (s *RobotSupervisor) tick(now time.Time) {
 		robotLogf("[RobotSupervisor] adopted_manual_actors count=%d\n", adopted)
 	}
 	s.maintainTarget(rc)
+	// The demand layer runs after target maintenance so it sees the same actor
+	// population the fill is about to draw from, and before the offline sweep so
+	// a robot it stands down is released on this tick rather than the next.
+	s.applyOnlineDemand(now, rc)
 	s.releaseBrokenLeases(now, rc)
 	s.cleanupBlockedUIDs(10)
 	s.recycleUnhealthyActors(now, rc)
-	s.recycleDesiredOfflineAutoActors()
+	s.recycleDesiredOfflineAutoActors(now, rc)
 	s.assignIdleAutoActors(rc)
 	s.updateMetrics(rc, signals)
 }

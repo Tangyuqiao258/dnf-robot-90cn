@@ -5,7 +5,16 @@ import (
 	"time"
 
 	actormodel "robot/internal/actor"
+	robotconfig "robot/internal/capability/robotconfig"
 )
+
+// sweepOffline releases one offline batch synchronously: the sweep hands the
+// real logouts to a goroutine so the supervisor tick keeps its cadence, and the
+// test waits for that batch the same way the shutdown path does.
+func sweepOffline(supervisor *RobotSupervisor) {
+	supervisor.recycleDesiredOfflineAutoActors(time.Now(), robotconfig.Default())
+	supervisor.waitForOfflineReleaseSweep(5 * time.Second)
+}
 
 func TestSupervisorRecyclesOfflineAutoActor(t *testing.T) {
 	manager := testRobotManagerWithConfig(t, "")
@@ -26,7 +35,7 @@ func TestSupervisorRecyclesOfflineAutoActor(t *testing.T) {
 		t.Fatalf("snapshot after logout = %+v", snapshot)
 	}
 
-	supervisor.recycleDesiredOfflineAutoActors()
+	sweepOffline(supervisor)
 
 	if supervisor.ledger.HasUID(uid) {
 		t.Fatal("uid lease retained after offline recycle")
@@ -39,7 +48,7 @@ func TestSupervisorRecyclesOfflineAutoActor(t *testing.T) {
 	if !actor.AssignAndWait(uid, time.Second) || !supervisor.ledger.TryLeaseUID(uid, actor) {
 		t.Fatal("reassign actor")
 	}
-	supervisor.recycleDesiredOfflineAutoActors()
+	sweepOffline(supervisor)
 	if !supervisor.ledger.HasUID(uid) {
 		t.Fatal("online-desired actor lost its lease")
 	}
