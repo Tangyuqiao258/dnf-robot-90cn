@@ -12,7 +12,6 @@ type Maintenance struct {
 }
 
 type MaintenanceEnv interface {
-	ApplyConfiguredLocation(info *robotcap.Info, rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem)
 	LoadMapCatalog() []shared.MapCatalogItem
 	Logf(format string, args ...interface{})
 	RandBetween(min, max int) int
@@ -23,6 +22,13 @@ type MaintenanceEnv interface {
 	RevokeStorePermission(uid, cid int) error
 	SelectRobots(req robotcap.CommandRequest) ([]robotcap.Info, error)
 	SyncCharacterVillage(cid int, village int) (int, error)
+}
+
+// demandLocationEnv is the part of MaintenanceEnv that knows the operator's
+// demand plan. An env that does not implement it leaves the fallback position
+// alone, which is what an adapter with no plan wants.
+type demandLocationEnv interface {
+	DemandLocation(uid int) (village, area, x, y int, ok bool)
 }
 
 func (m Maintenance) RestoreAutoNormalPosition(info robotcap.Info, rc robotconfig.RuntimeConfig, reason string) (robotcap.Info, error) {
@@ -62,9 +68,21 @@ func (m Maintenance) FinishStoreState(uid, cid int, reason string) {
 	env.Logf("[StoreCleanup] uid=%d cid=%d reason=%s\n", uid, cid, reason)
 }
 
+// randomNormalPosition picks where a robot stands once its store round is over.
+// The operator's demand plan outranks every rule below: a robot the demand
+// layer pinned goes back to its pin, because the pin is the operator saying
+// where that robot belongs. Without this check the restore sweep was free to
+// move a named crowd off the map it was named for.
 func (m Maintenance) randomNormalPosition(info robotcap.Info, rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem) robotcap.Info {
 	env := m.Env
 	normal := info
+	if plans, ok := env.(demandLocationEnv); ok {
+		if village, area, x, y, pinned := plans.DemandLocation(info.UID); pinned {
+			normal.Village, normal.Area = village, area
+			normal.X, normal.Y = x, y
+			return normal
+		}
+	}
 	normal.Village = rc.SpawnFallbackVillage
 	normal.Area = rc.SpawnArea
 	normal.X = env.RandBetween(rc.SpawnXMin, rc.SpawnXMax)
@@ -92,7 +110,13 @@ func (m Maintenance) randomNormalPosition(info robotcap.Info, rc robotconfig.Run
 			}
 		}
 	}
-	env.ApplyConfiguredLocation(&normal, rc, normalMaps)
+	// The configured spawn location is deliberately not applied here. With
+	// follow_account set it resolves to whichever town the operator's own
+	// character is standing in, so every store round ended by dragging its
+	// robot into that one town: the whole fleet, the named resident crowds
+	// included, converged on a single map and the server's session loops
+	// stalled under the crowd. The balanced and random picks above already
+	// land on a usable normal map, which is all a restore needs.
 	if !mapAreaIncluded(normalMaps, normal.Village, normal.Area) {
 		normal.Village = rc.SpawnFallbackVillage
 		normal.Area = rc.SpawnArea

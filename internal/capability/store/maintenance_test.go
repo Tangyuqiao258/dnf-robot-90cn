@@ -17,8 +17,6 @@ type maintenanceTestEnv struct {
 	synced     bool
 }
 
-func (*maintenanceTestEnv) ApplyConfiguredLocation(*robotcap.Info, robotconfig.RuntimeConfig, []shared.MapCatalogItem) {
-}
 func (e *maintenanceTestEnv) LoadMapCatalog() []shared.MapCatalogItem { return e.maps }
 func (*maintenanceTestEnv) Logf(string, ...interface{})               {}
 func (*maintenanceTestEnv) RandBetween(min, _ int) int                { return min }
@@ -115,5 +113,65 @@ func TestRestoreAutoNormalPositionStopsWhenDummyWriteFails(t *testing.T) {
 	}
 	if env.synced {
 		t.Fatal("character village sync ran after dummy write failure")
+	}
+}
+
+// pinnedMaintenanceTestEnv is the base env plus the demand plan. Only it
+// implements demandLocationEnv, so the other tests keep exercising the path an
+// adapter with no plan takes.
+type pinnedMaintenanceTestEnv struct {
+	*maintenanceTestEnv
+	village, area, x, y int
+}
+
+func (e pinnedMaintenanceTestEnv) DemandLocation(uid int) (int, int, int, int, bool) {
+	if uid != 17000042 {
+		return 0, 0, 0, 0, false
+	}
+	return e.village, e.area, e.x, e.y, true
+}
+
+// A store round must put a pinned robot back on the map the operator pinned it
+// to. The whole fleet used to converge on one town because this path chose the
+// follow account's town instead.
+func TestRestoreAutoNormalPositionKeepsTheDemandPin(t *testing.T) {
+	base := &maintenanceTestEnv{
+		maps: []shared.MapCatalogItem{
+			{Village: 1, Area: 0, Use: true, Rectangles: []shared.MapRectangle{{XMin: 10, XMax: 20, YMin: 30, YMax: 40}}},
+			{Village: 2, Area: 0, Use: true, Rectangles: []shared.MapRectangle{{XMin: 100, XMax: 120, YMin: 130, YMax: 140}}},
+		},
+	}
+	env := pinnedMaintenanceTestEnv{maintenanceTestEnv: base, village: 39, area: 0, x: 1686, y: 155}
+	info := robotcap.Info{UID: 17000042, CID: 1, Level: 85}
+	normal, err := (Maintenance{Env: env}).RestoreAutoNormalPosition(info, robotconfig.Default(), "store_expired")
+	if err != nil {
+		t.Fatalf("restore normal: %v", err)
+	}
+	if normal.Village != 39 || normal.Area != 0 || normal.X != 1686 || normal.Y != 155 {
+		t.Fatalf("normal=%+v, want the demand pin 39/0/1686/155", normal)
+	}
+	if base.restored != normal {
+		t.Fatalf("restored=%+v, want %+v", base.restored, normal)
+	}
+}
+
+// A robot the plan does not want keeps the capacity-balanced pick even when the
+// pin range is populated.
+func TestRestoreAutoNormalPositionIgnoresOtherRobotsPins(t *testing.T) {
+	base := &maintenanceTestEnv{
+		maps: []shared.MapCatalogItem{
+			{Village: 1, Area: 0, Use: true, Rectangles: []shared.MapRectangle{{XMin: 10, XMax: 20, YMin: 30, YMax: 40}}},
+			{Village: 2, Area: 0, Use: true, Rectangles: []shared.MapRectangle{{XMin: 100, XMax: 120, YMin: 130, YMax: 140}}},
+		},
+		locations: []shared.MapLocation{{Village: 1, Area: 0, X: 15, Y: 35}},
+	}
+	env := pinnedMaintenanceTestEnv{maintenanceTestEnv: base, village: 39, area: 0, x: 1686, y: 155}
+	info := robotcap.Info{UID: 17000043, CID: 1, Level: 85}
+	normal, err := (Maintenance{Env: env}).RestoreAutoNormalPosition(info, robotconfig.Default(), "store_expired")
+	if err != nil {
+		t.Fatalf("restore normal: %v", err)
+	}
+	if normal.Village != 2 || normal.Area != 0 {
+		t.Fatalf("normal=%+v, want the balanced empty village 2", normal)
 	}
 }

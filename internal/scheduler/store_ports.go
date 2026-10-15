@@ -221,12 +221,19 @@ type storeMaintenanceEnv struct {
 	manager *RobotManager
 }
 
-func (e storeMaintenanceEnv) ApplyConfiguredLocation(info *robotcap.Info, rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem) {
-	e.manager.applyConfiguredLocation(info, rc, maps)
-}
-
 func (e storeMaintenanceEnv) LoadMapCatalog() []shared.MapCatalogItem {
 	return e.manager.loadMapCatalog()
+}
+
+// DemandLocation reports the position the operator's demand plan pinned this
+// robot to, so a store round restores the robot to its pin rather than to a
+// town the spawn settings would pick.
+func (e storeMaintenanceEnv) DemandLocation(uid int) (int, int, int, int, bool) {
+	pin, ok := e.manager.demandLocationFor(uid)
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	return pin.village, pin.area, pin.x, pin.y, true
 }
 
 func (e storeMaintenanceEnv) Logf(format string, args ...interface{}) {
