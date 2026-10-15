@@ -47,7 +47,10 @@ const (
 	//	6 — rows carry the actor slot and the runtime-move marker, so the server
 	//	    stops translating them as legacy worn slots and a 称号 reaches the
 	//	    client in the slot 13 the client keeps for it
-	cn90LoadoutVersion = 6
+	//	7 — the operator's rules for what a robot may be handed reach the fleet:
+	//	    no 宠物蛋 creature, no name carrying GM, (旧) or a bracket, one 装扮
+	//	    family per robot, titles drawn from the three approved ranks
+	cn90LoadoutVersion = 7
 )
 
 // cn90TitleSlot is the actor slot the client keeps for 称号: the last of the
