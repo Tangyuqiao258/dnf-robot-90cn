@@ -87,6 +87,10 @@ type dungeonState struct {
 	// A run is active from the op16 reply alone, but the character only stands
 	// in the dungeon once the server has released the scene behind op37.
 	loaded bool
+	// since is when the current run became active. A party follower is pulled
+	// into a run it never asked for, and how long it should stand in one is
+	// measured from the run rather than from whenever its own timer fires.
+	since time.Time
 }
 
 func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
@@ -97,6 +101,7 @@ func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
 	st.difficulty = difficulty
 	st.dead = false
 	st.loaded = false
+	st.since = time.Now()
 }
 
 // markLeft clears the run. The server sends the town transition (class0/op24)
@@ -110,6 +115,7 @@ func (st *dungeonState) markLeft() {
 	st.difficulty = 0
 	st.dead = false
 	st.loaded = false
+	st.since = time.Time{}
 }
 
 func (st *dungeonState) markDeath(revived bool) {
@@ -136,6 +142,12 @@ func (st *dungeonState) snapshot() (active bool, dungeonID uint32, difficulty by
 	return st.active, st.dungeonID, st.difficulty, st.dead
 }
 
+func (st *dungeonState) startedAt() time.Time {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.since
+}
+
 // InDungeon reports whether the server has an active run for this session.
 func (s *Session) InDungeon() bool {
 	if s == nil || s.dungeon == nil {
@@ -143,6 +155,15 @@ func (s *Session) InDungeon() bool {
 	}
 	active, _, _, _ := s.dungeon.snapshot()
 	return active
+}
+
+// DungeonSince reports when the active run started. It is a zero time when no
+// run is active.
+func (s *Session) DungeonSince() time.Time {
+	if s == nil || s.dungeon == nil {
+		return time.Time{}
+	}
+	return s.dungeon.startedAt()
 }
 
 // DungeonDead reports whether the last death notice was a death rather than a
@@ -263,6 +284,19 @@ func (s *Session) observeDungeon(packet protocol.Packet) {
 			case s.reviveQueue <- struct{}{}:
 			default:
 			}
+		}
+	case packet.Class == protocol.ClassNotice &&
+		(packet.Type == protocol.NotiDungeonInfo || packet.Type == protocol.NotiDungeonStartMap):
+		// The entry projections. A session that ran the selector itself has
+		// already marked the run active from the op16 reply; these are what tell
+		// a session the server moved on its own, which is how a party follower
+		// learns it is standing inside the leader's run. Without them a follower
+		// never finds out: op42 is dropped while no run is active, so a follower
+		// that does not know it is in one stays in the dungeon until its session
+		// ends.
+		if active, _, _, _ := state.snapshot(); !active {
+			state.markActive(0, 0)
+			foundationlog.Robotf("CN90_DUNGEON_FOLLOWED cid=%d op=%d\n", s.selfCharacterID, packet.Type)
 		}
 	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiFinishLoading:
 		// The character-state push that answers the loading acknowledgement.

@@ -13,6 +13,7 @@ import (
 	"robot/internal/foundation/lockhub"
 	"robot/internal/shared"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 )
@@ -626,6 +627,284 @@ func (r *RobotRuntime) AutoDungeonEnter(uid int) robotcap.ActionResult {
 			Message: fmt.Sprintf("dungeon=%d difficulty=%d", dungeonID, difficulty),
 		}
 	})
+}
+
+const (
+	// partyFormationGrace is how long a party of robots may stand in town with no
+	// run before the fleet treats it as abandoned and leaves it. It has to outlast
+	// the assembly window -- the invite wait plus the entry -- or a party would be
+	// torn down while its leader is still gathering it.
+	partyFormationGrace = 90 * time.Second
+	// partyInvitePoll paces the wait for invitations to be answered. The server
+	// pushes the roster as each member joins, so this polls state that is already
+	// local rather than anything on the wire.
+	partyInvitePoll = 500 * time.Millisecond
+)
+
+// partyTransport is the part of the backend action surface the party-run
+// actions use, named rather than written inline so the invite wait can take it
+// as a parameter.
+type partyTransport interface {
+	InviteParty(int, int) error
+	PartyMembers(int) ([]int, bool)
+	PartySince(int) (time.Time, bool)
+	LeaveParty(int) error
+	DungeonState(int) (bool, bool, time.Time)
+	EnterDungeon(int, uint32, byte) error
+	LeaveDungeon(int) error
+}
+
+// AutoPartyDungeonEnter forms a party out of the robots standing on this robot's
+// own map and walks the whole party into one dungeon run.
+//
+// The server does the half that would otherwise need fan-out: the leader's op16
+// preflights every member and commits a run for each of them, and the followers
+// are pulled in by the server rather than entering anything themselves. So
+// nothing here enters a dungeon on a member's behalf, and nothing here has to
+// tell a member where to go.
+//
+// The exit is the part the fleet owes in exchange, and it is not a courtesy:
+// there is no party-wide dungeon exit on the server, so every member has to
+// leave its own run. That belongs to AutoPartyDungeonExit, for the leader as
+// much as for the followers, which is why this action forms the party and
+// starts the run but ends neither of them itself.
+//
+// The gates mirror AutoDungeonEnter. A robot already in a party is refused: the
+// party owns its member, and a second formation would fight the first.
+func (r *RobotRuntime) AutoPartyDungeonEnter(uid int) robotcap.ActionResult {
+	return r.run(uid, func() robotcap.ActionResult {
+		if err := r.manager.requireBackendCapability(shared.CapabilityParty); err != nil {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
+		}
+		if err := r.manager.requireBackendCapability(shared.CapabilityDungeonEnter); err != nil {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateCancelled, Message: err.Error()}
+		}
+		st, ok := r.Status(uid)
+		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 || st.PartyActive || r.PartyActive(uid) {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
+		}
+		if st.RobotType == 2 || st.RobotType == 3 || st.StoreDisplayAck {
+			// Never disturb an active stall; the action timer retries later.
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "store_active"}
+		}
+		rc := r.Config()
+		if !rc.AutoPartyDungeon {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "disabled"}
+		}
+		if rc.AutoDungeonEnterID <= 0 || rc.AutoDungeonEnterID > math.MaxUint32 {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled,
+				Message: fmt.Sprintf("dungeon id out of range: %d", rc.AutoDungeonEnterID)}
+		}
+		if rc.AutoDungeonEnterDifficulty < 0 || rc.AutoDungeonEnterDifficulty > math.MaxUint8 {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled,
+				Message: fmt.Sprintf("dungeon difficulty out of range: %d", rc.AutoDungeonEnterDifficulty)}
+		}
+		party, ok := r.manager.actions.(partyTransport)
+		if !ok {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party_dungeon_unsupported"}
+		}
+		size := rc.AutoPartyDungeonSize
+		if size < 2 {
+			size = 2
+		}
+		invited := r.partyCandidates(uid, st.CID, st.Village, st.Area, size-1)
+		if len(invited) == 0 {
+			// Nothing to gather here. The next tick looks again, and by then the
+			// robots on this map have moved on, which is the whole point of retrying
+			// rather than widening the search to another map.
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "no_candidates"}
+		}
+		sent := 0
+		for _, target := range invited {
+			// A refused invitation is the other robot's business -- it may have just
+			// been invited by somebody else, or be walking out of the area -- and one
+			// refusal does not spoil the invitations that were sent.
+			if err := party.InviteParty(uid, target); err == nil {
+				sent++
+			}
+		}
+		if sent == 0 {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed, Message: "party_invite_failed"}
+		}
+		members := r.awaitPartyMembers(party, uid, size, time.Duration(rc.AutoPartyDungeonInviteTimeoutSec)*time.Second)
+		if members < 2 {
+			// Nobody answered. Leaving costs one packet and clears the party the
+			// server may be holding for this character alone, so the next formation
+			// starts from nothing rather than from a party of one.
+			_ = party.LeaveParty(uid)
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party_not_formed"}
+		}
+		dungeonID := uint32(rc.AutoDungeonEnterID)
+		difficulty := byte(rc.AutoDungeonEnterDifficulty)
+		if err := party.EnterDungeon(uid, dungeonID, difficulty); err != nil {
+			// The party is formed and the run was refused. Every member is standing
+			// in town inside a party with nothing to do, so the leader leaves it and
+			// lets the members find their own way out through AutoPartyDungeonExit,
+			// which ends a party that never got anywhere.
+			_ = party.LeaveParty(uid)
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed,
+				Message: fmt.Sprintf("party=%d dungeon=%d entry failed: %v", members, dungeonID, err)}
+		}
+		return robotcap.ActionResult{
+			UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
+			Message: fmt.Sprintf("party=%d dungeon=%d difficulty=%d", members, dungeonID, difficulty),
+		}
+	})
+}
+
+// awaitPartyMembers waits until the party has reached the wanted size or the
+// window closes, and reports the membership it ended on.
+func (r *RobotRuntime) awaitPartyMembers(party partyTransport, uid, wanted int, window time.Duration) int {
+	deadline := time.Now().Add(window)
+	for {
+		members, _ := party.PartyMembers(uid)
+		if len(members) >= wanted || !time.Now().Before(deadline) {
+			return len(members)
+		}
+		time.Sleep(partyInvitePoll)
+	}
+}
+
+// partyCandidates picks the robots this formation may invite: the fleet robots
+// standing on the leader's own map, online, in no party and running no stall.
+//
+// The map is not a preference. The server forwards an invitation only to a
+// target in the inviter's own town area and drops it without a word otherwise,
+// so an invitation to anywhere else is a packet that was never going to be read.
+// The order is by uid, which keeps a retry on the same map choosing the same
+// robots rather than a fresh coin toss.
+func (r *RobotRuntime) partyCandidates(uid, selfCharacterID, village, area, limit int) []int {
+	if limit <= 0 {
+		return nil
+	}
+	status := r.manager.runtimeStatusMapCopy()
+	type candidate struct {
+		uid int
+		cid int
+	}
+	ready := make([]candidate, 0, len(status))
+	for other, st := range status {
+		if other == uid || st.CID <= 0 || st.CID == selfCharacterID {
+			continue
+		}
+		if !robotcap.ActiveRuntimeStatus(st) || st.PartyActive {
+			continue
+		}
+		if st.RobotType == 2 || st.RobotType == 3 || st.StoreDisplayAck {
+			continue
+		}
+		if st.Village != village || st.Area != area {
+			continue
+		}
+		ready = append(ready, candidate{uid: other, cid: st.CID})
+	}
+	sort.Slice(ready, func(i, j int) bool { return ready[i].uid < ready[j].uid })
+	if len(ready) > limit {
+		ready = ready[:limit]
+	}
+	targets := make([]int, 0, len(ready))
+	for _, item := range ready {
+		targets = append(targets, item.cid)
+	}
+	return targets
+}
+
+// AutoPartyDungeonExit is the exit duty of a party run, and it belongs to the
+// leader as much as to the followers.
+//
+// It does two things, and both exist because the server leaves them to the
+// client. A member of a party run has to leave its own run -- there is no
+// party-wide dungeon exit, and a character left inside one never walks back to
+// town on its own. And a party that never got as far as a run has to be ended by
+// somebody: the fleet forms parties of its own, so it has to be able to end
+// them, or the members stand frozen in town for as long as the party exists.
+//
+// The party is only ever ended when every member is one of this fleet's online
+// robots. A party holding a character the fleet does not run is somebody else's,
+// and the robots in it were asked to be there.
+func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
+	return r.run(uid, func() robotcap.ActionResult {
+		st, ok := r.Status(uid)
+		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 {
+			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
+		}
+		rc := r.Config()
+		if !rc.AutoPartyDungeon {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "disabled"}
+		}
+		party, ok := r.manager.actions.(partyTransport)
+		if !ok {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party_dungeon_unsupported"}
+		}
+		leftRun := false
+		if active, selfStarted, since := party.DungeonState(uid); active {
+			// The hold is measured from the run, not from this tick, so a robot the
+			// server dragged in is not thrown out again a second later just because
+			// its own timer happened to be due.
+			hold := time.Duration(rc.AutoPartyDungeonDwellSec) * time.Second
+			if hold > 0 && !since.IsZero() && time.Since(since) < hold {
+				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "dungeon_hold"}
+			}
+			if err := party.LeaveDungeon(uid); err != nil {
+				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed,
+					Message: fmt.Sprintf("dungeon exit failed: %v (started by this robot: %t)", err, selfStarted)}
+			}
+			leftRun = true
+		}
+		members, known := party.PartyMembers(uid)
+		if !known || len(members) <= 1 {
+			if leftRun {
+				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent, Message: "dungeon_exited"}
+			}
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "no_party"}
+		}
+		if !leftRun {
+			// Nothing has happened yet. This is either a formation in progress or a
+			// party that never got anywhere, and only its age tells them apart.
+			since, ok := party.PartySince(uid)
+			if !ok || time.Since(since) < partyFormationGrace {
+				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party_forming"}
+			}
+		}
+		if !r.partyIsFleet(members) {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party_foreign"}
+		}
+		if err := party.LeaveParty(uid); err != nil {
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed,
+				Message: fmt.Sprintf("party leave failed: %v", err)}
+		}
+		return robotcap.ActionResult{
+			UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
+			Message: fmt.Sprintf("party_left members=%d dungeon=%t", len(members), leftRun),
+		}
+	})
+}
+
+// partyIsFleet reports whether every member of the party is one of this fleet's
+// online robots.
+//
+// It reads the live status map, so a member that has gone offline reads as a
+// stranger and the party is left alone. That is the safe direction: the cost of
+// being wrong is a party of robots that stands still until the demand layer
+// recycles one of them, while the cost of the other mistake is a fleet walking
+// out of a player's party.
+func (r *RobotRuntime) partyIsFleet(members []int) bool {
+	if len(members) == 0 {
+		return false
+	}
+	status := r.manager.runtimeStatusMapCopy()
+	online := make(map[int]bool, len(status))
+	for _, st := range status {
+		if st.CID > 0 {
+			online[st.CID] = true
+		}
+	}
+	for _, member := range members {
+		if !online[member] {
+			return false
+		}
+	}
+	return true
 }
 
 // AutoServerNotice runs one fleet-paced server-notice action: it prepares the

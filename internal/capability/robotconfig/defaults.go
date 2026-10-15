@@ -50,6 +50,14 @@ func Default() RuntimeConfig {
 		// party limit, no fatigue tag); any other server has to override it.
 		AutoDungeonEnter: false, AutoDungeonEnterID: 3, AutoDungeonEnterDifficulty: 0,
 		AutoDungeonEnterIntervalMinSec: 600, AutoDungeonEnterIntervalMaxSec: 1800,
+		// A party run is opt-in for the same reason the solo one is, and it
+		// commits the run on every member rather than on one character. It also
+		// reuses AutoDungeonEnterID/Difficulty: the dungeon is a property of the
+		// server's PVF, so two switches naming two dungeons would be two places
+		// to get it wrong.
+		AutoPartyDungeon: false, AutoPartyDungeonSize: 3,
+		AutoPartyDungeonIntervalMinSec: 600, AutoPartyDungeonIntervalMaxSec: 1800,
+		AutoPartyDungeonDwellSec: 60, AutoPartyDungeonInviteTimeoutSec: 12,
 		AutoServerNotice:                false,
 		ServerNoticeRobotIntervalMinSec: 900,
 		ServerNoticeRobotIntervalMaxSec: 3600,
@@ -396,6 +404,40 @@ func normalizeAutoSchedule(rc *RuntimeConfig) {
 	}
 	if rc.AutoDungeonEnterIntervalMaxSec < rc.AutoDungeonEnterIntervalMinSec {
 		rc.AutoDungeonEnterIntervalMaxSec = rc.AutoDungeonEnterIntervalMinSec + 600
+	}
+	// A party run is the same round trip with company, so it keeps the same
+	// pacing floor. The size is clamped to the server's four fixed party slots:
+	// a fifth member cannot exist, and a party of one is not a party.
+	if rc.AutoPartyDungeonSize < 2 {
+		rc.AutoPartyDungeonSize = 2
+	}
+	if rc.AutoPartyDungeonSize > 4 {
+		rc.AutoPartyDungeonSize = 4
+	}
+	if rc.AutoPartyDungeonIntervalMinSec < 60 {
+		rc.AutoPartyDungeonIntervalMinSec = 60
+	}
+	if rc.AutoPartyDungeonIntervalMaxSec < rc.AutoPartyDungeonIntervalMinSec {
+		rc.AutoPartyDungeonIntervalMaxSec = rc.AutoPartyDungeonIntervalMinSec + 600
+	}
+	// The invite wait has to be long enough for a forwarded prompt to be
+	// answered and the roster notice to arrive, and short enough that the
+	// leader is still standing where it invited from: the server drops the
+	// whole entry when a member has walked out of the leader's area.
+	if rc.AutoPartyDungeonInviteTimeoutSec < 3 {
+		rc.AutoPartyDungeonInviteTimeoutSec = 3
+	}
+	if rc.AutoPartyDungeonInviteTimeoutSec > 60 {
+		rc.AutoPartyDungeonInviteTimeoutSec = 60
+	}
+	// The dwell is how long the party stays inside before it walks back out.
+	// Zero would enter and leave in the same breath, which is what the solo
+	// switch already does.
+	if rc.AutoPartyDungeonDwellSec < 5 {
+		rc.AutoPartyDungeonDwellSec = 5
+	}
+	if rc.AutoPartyDungeonDwellSec > 900 {
+		rc.AutoPartyDungeonDwellSec = 900
 	}
 	if rc.AutoTargetOnlineCount < 0 {
 		rc.AutoTargetOnlineCount = 0

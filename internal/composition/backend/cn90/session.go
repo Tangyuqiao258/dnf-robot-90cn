@@ -82,6 +82,11 @@ type Session struct {
 	// follow is the party leader tracker, created only for a session opened
 	// with EnablePartyFollow.
 	follow *partyFollowState
+	// roster is the party membership the server last reported. The invitee
+	// learns its party from it and the inviter learns which invitations were
+	// answered, so it is created for every session that takes part in party
+	// life at all.
+	roster *partyRosterState
 	// dungeon tracks the active run and the character's death state.
 	dungeon *dungeonState
 	// townPosition is the last town coordinate the server was told about. A
@@ -238,6 +243,12 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	}
 	if request.EnablePartyFollow {
 		session.startPartyFollow(runCtx)
+	}
+	// Membership tracking rides on any party role, not just the invite one: a
+	// session that only answers invitations still has to know when the party it
+	// answered for has ended, and the roster is the only notice that says so.
+	if request.EnablePartyAutoAccept || request.EnablePartyFollow || request.EnablePartyInvite {
+		session.startPartyRoster(runCtx)
 	}
 	// The run and death state is tracked for every session: it is what tells the
 	// runtime whether a dungeon command is meaningful at all, and recording it

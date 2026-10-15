@@ -21,6 +21,11 @@ type ActionTransport struct {
 	sessions      map[int]shared.RobotSession
 	status        map[int]shared.RuntimeStatus
 	locationKnown map[int]bool
+	// dungeonSelfStarted records the sessions whose current run this transport
+	// asked for. A party member is pulled into the leader's run by the server
+	// and never enters one itself, so this is what tells the exit duty which
+	// side of a party run a robot is on.
+	dungeonSelfStarted map[int]bool
 	// stackables is the stockable catalog shared with the offline stage. The
 	// assembly writes it once before the runtime starts and only reads it
 	// afterwards, so it carries no lock of its own.
@@ -137,6 +142,7 @@ func (t *ActionTransport) reapSession(uid int, session shared.RobotSession) {
 		delete(t.sessions, uid)
 		t.status[uid] = shared.RuntimeStatus{UID: uid, StateName: shared.RuntimeStateStop}
 		delete(t.locationKnown, uid)
+		delete(t.dungeonSelfStarted, uid)
 	}
 	t.mu.Unlock()
 }
@@ -149,6 +155,7 @@ func (t *ActionTransport) Detach(uid int) {
 	delete(t.sessions, uid)
 	t.status[uid] = shared.RuntimeStatus{UID: uid, StateName: shared.RuntimeStateStop}
 	delete(t.locationKnown, uid)
+	delete(t.dungeonSelfStarted, uid)
 	t.mu.Unlock()
 }
 
@@ -202,6 +209,13 @@ func (t *ActionTransport) RuntimeStatusMap() map[int]shared.RuntimeStatus {
 			status.UptimeSeconds = int(time.Now().Unix() - status.RunStartTime)
 			if status.UptimeSeconds < 0 {
 				status.UptimeSeconds = 0
+			}
+		}
+		// The party rule every scheduled action reads is only as good as this
+		// field, and nothing else writes it for this adapter.
+		if session := t.sessions[uid]; session != nil {
+			if provider, ok := session.(interface{ PartyActive() bool }); ok {
+				status.PartyActive = provider.PartyActive()
 			}
 		}
 		out[uid] = status
@@ -273,6 +287,12 @@ func (t *ActionTransport) ChangeEmotion(uid int, emotionIndex uint16) (uint16, e
 // windows inside this, so the ceiling only has to be the outer bound.
 const dungeonActionTimeout = 60 * time.Second
 
+// partyInviteTimeout bounds one op10 party invitation. The op10 acknowledgement
+// is written on the same path as an ordinary command, so the window only has to
+// cover a round trip; the answer that matters arrives later, as a roster
+// notice, and is not waited for here.
+const partyInviteTimeout = 10 * time.Second
+
 // EnterDungeon walks one session through a dungeon entry and waits until the
 // scene has loaded. It returns once the character is standing in the run, not
 // when the server has merely committed it.
@@ -292,7 +312,133 @@ func (t *ActionTransport) EnterDungeon(uid int, dungeonID uint32, difficulty byt
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dungeonActionTimeout)
 	defer cancel()
-	return entrant.EnterDungeon(ctx, dungeonID, difficulty)
+	if err := entrant.EnterDungeon(ctx, dungeonID, difficulty); err != nil {
+		return err
+	}
+	t.markDungeonOrigin(uid, true)
+	return nil
+}
+
+// markDungeonOrigin records whether the run a session is inside was started by
+// this transport. A robot can end up in a dungeon without ever asking for one:
+// the server drags every party member into the leader's run. The exit duty
+// belongs to whoever started it, so the follower side has to be able to tell
+// the two apart.
+func (t *ActionTransport) markDungeonOrigin(uid int, selfStarted bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.dungeonSelfStarted == nil {
+		t.dungeonSelfStarted = make(map[int]bool)
+	}
+	if selfStarted {
+		t.dungeonSelfStarted[uid] = true
+		return
+	}
+	delete(t.dungeonSelfStarted, uid)
+}
+
+// DungeonState reports whether the session has an active run, whether this
+// transport was the one that asked for it, and when the run started.
+func (t *ActionTransport) DungeonState(uid int) (active bool, selfStarted bool, since time.Time) {
+	session, err := t.session(uid)
+	if err != nil {
+		return false, false, time.Time{}
+	}
+	reporter, ok := session.(interface {
+		InDungeon() bool
+		DungeonSince() time.Time
+	})
+	if !ok || !reporter.InDungeon() {
+		return false, false, time.Time{}
+	}
+	t.mu.RLock()
+	selfStarted = t.dungeonSelfStarted[uid]
+	t.mu.RUnlock()
+	return true, selfStarted, reporter.DungeonSince()
+}
+
+// PartySince reports when the session's current party appeared, and whether the
+// server has reported a roster at all.
+func (t *ActionTransport) PartySince(uid int) (time.Time, bool) {
+	session, err := t.session(uid)
+	if err != nil {
+		return time.Time{}, false
+	}
+	provider, ok := session.(interface{ PartySince() (time.Time, bool) })
+	if !ok {
+		return time.Time{}, false
+	}
+	return provider.PartySince()
+}
+
+// PartyActive reports whether the session shares a party with another
+// character. The scheduler's party rule is built on it: a party owns its
+// member's actions, so the answer has to come from the live roster rather than
+// from a flag nothing writes.
+func (t *ActionTransport) PartyActive(uid int) bool {
+	members, known := t.PartyMembers(uid)
+	return known && len(members) > 1
+}
+
+// PartyMembers returns the character ids of the party the session is in and
+// whether the server has reported a roster at all.
+func (t *ActionTransport) PartyMembers(uid int) ([]int, bool) {
+	session, err := t.session(uid)
+	if err != nil {
+		return nil, false
+	}
+	provider, ok := session.(interface{ PartyMembers() ([]int, bool) })
+	if !ok {
+		return nil, false
+	}
+	return provider.PartyMembers()
+}
+
+// InviteParty sends an op10 party invitation from one session to another
+// character. The server forwards it only to a target standing in the inviter's
+// town area and drops it silently otherwise, so a caller that wants an answer
+// has to pick the target from the same map.
+func (t *ActionTransport) InviteParty(uid int, targetCharacterID int) error {
+	if t == nil {
+		return fmt.Errorf("90CN party invite needs a transport")
+	}
+	session, err := t.session(uid)
+	if err != nil {
+		return err
+	}
+	inviter, ok := session.(interface {
+		InviteParty(context.Context, int) error
+	})
+	if !ok {
+		return fmt.Errorf("90CN session does not expose the party invite protocol")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), partyInviteTimeout)
+	defer cancel()
+	return inviter.InviteParty(ctx, targetCharacterID)
+}
+
+// LeaveParty ends one session's own party membership. It is the counterpart of
+// InviteParty and the reason a formed party is not permanent: the server takes
+// the leave from any member, so a fleet that gathers itself can also let itself
+// go without a leader having to disband anything.
+func (t *ActionTransport) LeaveParty(uid int) error {
+	if t == nil {
+		return fmt.Errorf("90CN party leave needs a transport")
+	}
+	session, err := t.session(uid)
+	if err != nil {
+		return err
+	}
+	leaver, ok := session.(interface{ LeaveParty(context.Context) error })
+	if !ok {
+		return fmt.Errorf("90CN session does not expose the party leave protocol")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), partyInviteTimeout)
+	defer cancel()
+	return leaver.LeaveParty(ctx)
 }
 
 // LeaveDungeon abandons the run a session is inside and waits until the
@@ -316,7 +462,11 @@ func (t *ActionTransport) LeaveDungeon(uid int) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dungeonActionTimeout)
 	defer cancel()
-	return leaver.LeaveDungeon(ctx)
+	if err := leaver.LeaveDungeon(ctx); err != nil {
+		return err
+	}
+	t.markDungeonOrigin(uid, false)
+	return nil
 }
 
 func (t *ActionTransport) MoveTown(ctx context.Context, command shared.RuntimeMoveCommand) error {

@@ -105,3 +105,38 @@ func ResponsePeerResult(body []byte) (bool, byte) {
 	}
 	return false, 0
 }
+
+// PartyInviteMode is the quick-party invite the current client emits from its
+// party window. The server records it as a pending invite exactly like the
+// ordinary mode 0, but the answering client accepts a mode 13 prompt with
+// value one rather than zero, which is the shape the auto-accept session
+// already sends back.
+const PartyInviteMode byte = 13
+
+// partyMemberRealtimeRowBytes is one roster row: u16 character id, u8 hp
+// percent, u8 reserved and u8 party slot.
+const partyMemberRealtimeRowBytes = 5
+
+// ParsePartyRealtimeMembers parses the class0/0x0099 roster body
+// (u8 count + count rows) and returns the member character ids in the server's
+// slot order. An empty body with a zero count is a real answer — the session is
+// in no party — so only a body that does not match its own count is rejected.
+func ParsePartyRealtimeMembers(body []byte) ([]uint16, bool) {
+	if len(body) < 1 {
+		return nil, false
+	}
+	count := int(body[0])
+	if len(body) != 1+count*partyMemberRealtimeRowBytes {
+		return nil, false
+	}
+	members := make([]uint16, 0, count)
+	for slot := 0; slot < count; slot++ {
+		row := body[1+slot*partyMemberRealtimeRowBytes:]
+		member := binary.LittleEndian.Uint16(row[:2])
+		if member == 0 {
+			continue
+		}
+		members = append(members, member)
+	}
+	return members, true
+}

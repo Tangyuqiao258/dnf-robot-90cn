@@ -82,6 +82,12 @@ func (r *partyWaitRuntime) AutoEmote(uid int, _ uint16) robotcap.ActionResult {
 func (r *partyWaitRuntime) AutoDungeonEnter(uid int) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }
+func (r *partyWaitRuntime) AutoPartyDungeonEnter(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
+func (r *partyWaitRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
 func (r *partyWaitRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid, OK: true, State: robotcap.ActionStateNoticed}
 }

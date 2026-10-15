@@ -79,6 +79,12 @@ func (actorTestRuntime) AutoEmote(uid int, _ uint16) robotcap.ActionResult {
 func (actorTestRuntime) AutoDungeonEnter(uid int) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }
+func (actorTestRuntime) AutoPartyDungeonEnter(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
+func (actorTestRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
+	return robotcap.ActionResult{UID: uid}
+}
 func (actorTestRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
 	return robotcap.ActionResult{UID: uid}
 }

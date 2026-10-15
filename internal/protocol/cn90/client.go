@@ -285,6 +285,14 @@ func (c *Client) RequestPeer(ctx context.Context, targetID uint16, mode byte, va
 	return c.send(ctx, CmdRequestPeer, body)
 }
 
+// LeaveParty sends the empty op13 party leave. The acknowledgement and the
+// emptied roster are observed by the session, not read here: the roster is what
+// the caller waits on, because it is the same notice every other membership
+// change arrives in.
+func (c *Client) LeaveParty(ctx context.Context) error {
+	return c.send(ctx, CmdLeaveParty, nil)
+}
+
 // ResponsePeer answers a forwarded peer prompt with the exact seven-byte op11
 // shape. Party invites accept with value 0 (modes 0/12) or 1 (modes 4/13), and
 // a trade prompt accepts with value 0.

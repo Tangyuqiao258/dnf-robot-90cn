@@ -219,6 +219,7 @@ func (d protocolSessionDriver) SendOnline(users []shared.RuntimeOnlineUser) erro
 			EnablePartyDungeonFollower: backendPartyFollowerEnabled(d.manager.backendInfo, rc),
 			EnablePartyAutoAccept:      backendPartyAutoAcceptEnabled(d.manager.backendInfo, rc),
 			EnablePartyFollow:          backendPartyFollowEnabled(d.manager.backendInfo, rc),
+			EnablePartyInvite:          backendPartyInviteEnabled(d.manager.backendInfo, rc),
 			EnableDungeonRevive:        backendDungeonReviveEnabled(d.manager.backendInfo, rc),
 			EnableChatReply:            backendChatReplyEnabled(d.manager.backendInfo, rc),
 			ChatReplies:                d.manager.loadShoutTemplates().Messages,
@@ -266,6 +267,14 @@ func backendPartyAutoAcceptEnabled(info shared.BackendInfo, rc robotconfig.Runti
 // transport as auto-accept, so it is gated by the same capability.
 func backendPartyFollowEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
 	return rc.AutoPartyFollow && info.Supports(shared.CapabilityParty)
+}
+
+// backendPartyInviteEnabled reports whether new sessions should track the party
+// membership the server reports. The invitation itself is sent by the party-run
+// action, but the roster a session needs to see its own party is a session
+// option, so the switch reaches the session through the same door as the rest.
+func backendPartyInviteEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
+	return rc.AutoPartyDungeon && info.Supports(shared.CapabilityParty)
 }
 
 func backendDungeonReviveEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {

@@ -88,3 +88,43 @@ func TestResponsePeerBodyAndResult(t *testing.T) {
 		t.Fatal("empty ack was treated as success")
 	}
 }
+
+// TestParsePartyRealtimeMembersReadsTheRosterRows covers the class0/0x0099 body
+// the server pushes on every membership change: a count, then one five-byte row
+// per slot. The slot byte is the row's position in the recipient's own
+// projection, so the ids come back in the order they arrived and the byte
+// itself is not read.
+func TestParsePartyRealtimeMembersReadsTheRosterRows(t *testing.T) {
+	body := []byte{
+		2,
+		0xea, 0x03, 100, 0, 0, // 0x03ea = 1002 in slot 0
+		0xe9, 0x03, 87, 0, 1, // 0x03e9 = 1001 in slot 1
+	}
+	members, ok := ParsePartyRealtimeMembers(body)
+	if !ok || len(members) != 2 || members[0] != 1002 || members[1] != 1001 {
+		t.Fatalf("members = %v ok=%t", members, ok)
+	}
+
+	// The server sends a zero count to say the party is gone. That is a real
+	// answer, not a missing one, so it parses as an empty roster.
+	if members, ok := ParsePartyRealtimeMembers([]byte{0}); !ok || len(members) != 0 {
+		t.Fatalf("empty roster = %v ok=%t", members, ok)
+	}
+	// A zero id is a hole rather than a member. The server pads its rows, so it
+	// must not come back as a character.
+	if members, ok := ParsePartyRealtimeMembers([]byte{2, 0, 0, 0, 0, 0, 0xe9, 0x03, 100, 0, 1}); !ok ||
+		len(members) != 1 || members[0] != 1001 {
+		t.Fatalf("padded roster = %v ok=%t", members, ok)
+	}
+
+	// A count that disagrees with the body is not a roster.
+	for name, bad := range map[string][]byte{
+		"empty":     nil,
+		"truncated": {2, 0xea, 0x03, 100, 0, 0},
+		"overlong":  append(body, 0),
+	} {
+		if members, ok := ParsePartyRealtimeMembers(bad); ok {
+			t.Fatalf("%s body parsed as %v", name, members)
+		}
+	}
+}

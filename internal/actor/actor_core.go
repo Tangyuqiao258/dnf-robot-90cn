@@ -30,6 +30,8 @@ type Actor struct {
 	nextMail          time.Time
 	nextEmote         time.Time
 	nextDungeonEnter  time.Time
+	nextPartyDungeon  time.Time
+	nextPartyExit     time.Time
 	nextServerNotice  time.Time
 	storeUntil        time.Time
 	lastOnlineTry     time.Time

@@ -22,6 +22,11 @@ type OpenSessionRequest struct {
 	// follower toward it. Backends without a party transport leave it
 	// unimplemented.
 	EnablePartyFollow bool
+	// EnablePartyInvite makes the session track the party membership the server
+	// reports (class0/0x0099), so the runtime can invite other characters and
+	// learn which invitations were answered. Backends without a party transport
+	// leave it unimplemented.
+	EnablePartyInvite bool
 	// EnableDungeonRevive makes the session answer the server's death notice
 	// with a revive request, so a character that died inside a run is not
 	// returned to town by the server's ten second timer. Backends without a

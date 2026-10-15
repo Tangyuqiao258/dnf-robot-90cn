@@ -19,6 +19,14 @@ const (
 	CmdRequestPeer        uint16 = 10
 	CmdResponsePeer       uint16 = 11
 	CmdEnterSelectDungeon uint16 = 15
+	// CmdLeaveParty ends the sender's own party membership. The server consumes
+	// the request whoever sends it -- leader or not -- ignores the body, and
+	// answers with a one-byte acknowledgement plus the empty roster, so leaving is
+	// the one party edit that needs no role and no arguments. The last member to
+	// leave retires the party; a leader leaving with members still in it re-forms
+	// it under a successor, which is why the whole fleet leaves its own way out
+	// instead of the leader clearing the party for everyone.
+	CmdLeaveParty uint16 = 13
 	CmdSelectDungeon      uint16 = 16
 	CmdPeerChat           uint16 = 17
 	CmdMoveItemspace      uint16 = 19
@@ -90,6 +98,12 @@ const (
 	NotiUserPosition    uint16 = 0x0016
 	NotiUserArea        uint16 = 0x0017
 	NotiSceneTransition uint16 = 24
+	// NotiPartyMemberRealtime is the class-0/0x0099 PARTY_MEMBER_REALTIME_INFO
+	// roster. The server sends it to every member of a runtime party whenever
+	// the membership changes, and an empty roster (count zero) is how it says
+	// the party is gone, so it answers "am I in a party and with whom" without
+	// reading the scene-side op9 slot table.
+	NotiPartyMemberRealtime uint16 = 0x0099
 	// NotiDungeonInfo and NotiDungeonStartMap are pushed class-0 once the
 	// server has already made the run active; they are how a session learns it
 	// is inside a dungeon, not a precondition for entering one.

@@ -327,6 +327,7 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 	if !m.backendInfo.Supports(shared.CapabilityParty) {
 		rc.AutoPartyAccept = false
 		rc.AutoPartyFollow = false
+		rc.AutoPartyDungeon = false
 	}
 	if !m.backendInfo.Supports(shared.CapabilitySystemAnnouncement) {
 		rc.AutoSystemAnnouncement = false
@@ -342,6 +343,9 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 	// reverse is what the follower-side adapter would need.
 	if !m.backendInfo.Supports(shared.CapabilityDungeonEnter) {
 		rc.AutoDungeonEnter = false
+		// A party run needs both halves: the party transport to gather the
+		// members and the entry transport to start the run they walk into.
+		rc.AutoPartyDungeon = false
 	}
 	// The reply rides on the same directed-message transport as a shout, so a
 	// backend that cannot send one cannot answer one either.

@@ -9,6 +9,15 @@ import (
 	foundationlog "robot/internal/foundation/log"
 )
 
+const (
+	// partyExitIntervalMinSec/MaxSec pace the exit duty of a party run. It is the
+	// only scheduled round that answers a state the robot cannot walk out of by
+	// itself, so it ticks in tens of seconds rather than in the minutes every
+	// other automatic action is paced at.
+	partyExitIntervalMinSec = 15
+	partyExitIntervalMaxSec = 30
+)
+
 func (a *Actor) logoutCurrentUID() robotcap.ActionResult {
 	uid := a.uidValue()
 	if uid <= 0 {
@@ -294,6 +303,34 @@ func (a *Actor) tick(now time.Time) {
 			foundationlog.Robotf("[Actor] dungeon_enter_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
 		}
 	}
+	if !isStore && a.nextPartyDungeonDue(now, rc) {
+		var res robotcap.ActionResult
+		a.runBusy("party_dungeon", func() {
+			res = a.runtime.AutoPartyDungeonEnter(uid)
+		})
+		// A formation that found nobody to gather is ordinary business on a quiet
+		// map and stays inside the round, for the same reason the other rounds log
+		// rather than count.
+		if res.OK {
+			foundationlog.Robotf("[Actor] party_dungeon slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		} else if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] party_dungeon_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
+	// The exit duty is the one round that runs for a stall as well: a robot left
+	// inside a run is a robot nothing else in the fleet can help, and leaving a
+	// run is not a scene change a stall has to survive.
+	if a.nextPartyExitDue(now, rc) {
+		var res robotcap.ActionResult
+		a.runBusy("party_exit", func() {
+			res = a.runtime.AutoPartyDungeonExit(uid)
+		})
+		if res.OK {
+			foundationlog.Robotf("[Actor] party_exit slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		} else if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] party_exit_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
 	if !isStore && a.nextMoveDue(now, rc) {
 		a.runBusy("move", func() {
 			a.runtime.AutoMove(uid)
@@ -317,6 +354,8 @@ func (a *Actor) clearAutoActionSchedule() {
 	a.nextMail = time.Time{}
 	a.nextEmote = time.Time{}
 	a.nextDungeonEnter = time.Time{}
+	a.nextPartyDungeon = time.Time{}
+	a.nextPartyExit = time.Time{}
 	a.nextServerNotice = time.Time{}
 }
 
@@ -328,6 +367,8 @@ func (a *Actor) clearAutoScheduleLocked() {
 	a.nextMail = time.Time{}
 	a.nextEmote = time.Time{}
 	a.nextDungeonEnter = time.Time{}
+	a.nextPartyDungeon = time.Time{}
+	a.nextPartyExit = time.Time{}
 	a.nextServerNotice = time.Time{}
 	a.storeUntil = time.Time{}
 }
@@ -435,6 +476,31 @@ func (a *Actor) nextDungeonEnterDue(now time.Time, rc robotconfig.RuntimeConfig)
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	return a.randomizedDue(&a.nextDungeonEnter, now, rc.AutoDungeonEnterIntervalMinSec, rc.AutoDungeonEnterIntervalMaxSec)
+}
+
+// nextPartyDungeonDue paces one robot's attempt to gather a party and take it
+// into a run. It is the slowest round in the fleet: it commits runs on every
+// member it gathers, and the whole point of a party is that it is rare enough to
+// be worth looking at.
+func (a *Actor) nextPartyDungeonDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
+	if !rc.AutoPartyDungeon {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.randomizedDue(&a.nextPartyDungeon, now, rc.AutoPartyDungeonIntervalMinSec, rc.AutoPartyDungeonIntervalMaxSec)
+}
+
+// nextPartyExitDue paces the exit duty. It is a fast tick on purpose: it is what
+// takes a robot out of a run it was dragged into, and standing in a dungeon is
+// the one state nothing else in the fleet can act from.
+func (a *Actor) nextPartyExitDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
+	if !rc.AutoPartyDungeon {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.randomizedDue(&a.nextPartyExit, now, partyExitIntervalMinSec, partyExitIntervalMaxSec)
 }
 
 // nextServerNoticeDue is the per-robot timer. The fleet-wide gap and hourly
