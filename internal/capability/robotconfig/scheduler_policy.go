@@ -29,6 +29,63 @@ func PoolCapacity(rc RuntimeConfig) int {
 	return pool
 }
 
+// OfflineReleaseBatch is how many robots one sweep of the demand layer may log
+// out. The sweep is real logouts -- the session is closed and the lease
+// released -- so it is bounded: a whole layer turning over at once is a
+// disconnect storm against the server's login path, and the fleet's own slots
+// spend that time neither online nor available.
+func OfflineReleaseBatch(rc RuntimeConfig) int {
+	batch := rc.SchedulerOfflineReleaseBatch
+	if batch <= 0 {
+		batch = 5
+	}
+	if batch > 120 {
+		batch = 120
+	}
+	return batch
+}
+
+// OfflineReleaseGap is the pause between offline release sweeps.
+func OfflineReleaseGap(rc RuntimeConfig) time.Duration {
+	seconds := rc.SchedulerOfflineReleaseGapSec
+	if seconds <= 0 {
+		seconds = 5
+	}
+	if seconds > 3600 {
+		seconds = 3600
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// DemandPlayerPoll is how often the demand layer reads the player's position.
+// The server writes a character's town, area and coordinates as the player
+// moves, so this is the resolution at which the floating layer can react.
+func DemandPlayerPoll(rc RuntimeConfig) time.Duration {
+	seconds := rc.DemandPlayerPollSec
+	if seconds <= 0 {
+		seconds = 5
+	}
+	if seconds > 300 {
+		seconds = 300
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// DemandPlayerGrace is how long the floating layer keeps its last set after the
+// player stops being found. A logout, a closed client or one failed read must
+// not read as "nobody is here" and pull a whole layer of robots offline; the
+// grace window is what separates "the player left" from "the player blinked".
+func DemandPlayerGrace(rc RuntimeConfig) time.Duration {
+	seconds := rc.DemandPlayerGraceSec
+	if seconds <= 0 {
+		seconds = 600
+	}
+	if seconds > 86400 {
+		seconds = 86400
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func CreateRoom(rc RuntimeConfig, existing int) int {
 	room := TargetCapacity(rc) - existing
 	if room < 0 {

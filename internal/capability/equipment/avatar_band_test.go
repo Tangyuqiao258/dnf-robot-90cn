@@ -140,6 +140,57 @@ func TestSelectAvatarDressesTheRareBandAsOneSet(t *testing.T) {
 	}
 }
 
+// TestSelectAvatarKeepsOneNameFamily covers the operator's third rule for 装扮:
+// 前四个字一样的基本就是一套的. The archive's own set key cannot do this job -- every
+// 稀有装扮 piece of a job carries pvf_part_3 -- and the two families below share
+// their four-character root on purpose, which is the collision that would put a
+// 魔音 helmet on a 幻影 body.
+func TestSelectAvatarKeepsOneNameFamily(t *testing.T) {
+	slotWords := []string{"头盔", "长发", "眼妆", "披风", "胸甲", "护腿", "腰带", "长靴"}
+	items := make([]shared.EquipmentCatalogItem, 0, 16)
+	for slot := 0; slot < AvatarSlotCount; slot++ {
+		items = append(items,
+			shared.EquipmentCatalogItem{ID: 1000 + slot, ItemType: 20 + slot, Rarity: RareAvatarRarity, Name: "暗影魅月魔音" + slotWords[slot], SetKey: "pvf_part_3", UseJob: []int{7}},
+			shared.EquipmentCatalogItem{ID: 2000 + slot, ItemType: 20 + slot, Rarity: RareAvatarRarity, Name: "暗影魅月幻影" + slotWords[slot], SetKey: "pvf_part_3", UseJob: []int{7}},
+		)
+	}
+	rc := robotconfig.Default()
+	rc.AvatarSlots = nil
+	rc.PreferAvatarSets = true
+	rc.AvatarSetMinSlots = 6
+
+	// Both ends of the draw, so the seed piece is not always the same one.
+	for _, randIntn := range []func(int) int{func(int) int { return 0 }, func(n int) int { return n - 1 }} {
+		selected := SelectAvatar(items, RareAvatarMinLevel, 7, rc, randIntn)
+		roots := map[string]bool{}
+		for slot := 0; slot < AvatarSlotCount; slot++ {
+			item, ok := selected[slot]
+			if !ok {
+				t.Fatalf("slot %d left empty: %+v", slot, selected)
+			}
+			roots[string([]rune(item.Name)[:6])] = true
+		}
+		if len(roots) != 1 {
+			t.Fatalf("dressed from %d 装扮 sets: %v", len(roots), roots)
+		}
+	}
+}
+
+func TestAvatarFamilyKeyCountsRunes(t *testing.T) {
+	if got := AvatarFamilyKey("  暗影魅月魔音眼妆 "); got != "暗影魅月" {
+		t.Fatalf("family key = %q", got)
+	}
+	if got := AvatarFamilyKey("时装"); got != "" {
+		t.Fatalf("a two-character name named the family %q", got)
+	}
+	if got := AvatarNameAffinity("暗影魅月魔音眼妆", "暗影魅月幻影长发"); got != 4 {
+		t.Fatalf("affinity = %d, want the four shared characters", got)
+	}
+	if got := AvatarNameAffinity("sky", "sky"); got != 3 {
+		t.Fatalf("affinity = %d, want the whole shorter name", got)
+	}
+}
+
 // TestSelectAvatarNeverDressesTheSkinSlot is the operator's other half: the
 // native creation code leaves 皮肤 empty, so a catalog entry for it must not be
 // worn at any level, even though the slot is the ninth avatar slot and the

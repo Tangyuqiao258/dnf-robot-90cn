@@ -100,6 +100,7 @@ func validateRuntimeConfig(dec *foundationconfig.Decoder, rc RuntimeConfig) erro
 	checkRange("title", "title_item", rc.TitleItem, 1, 4294967295)
 	checkRange("title", "title_top_item", rc.TitleTopItem, 1, 4294967295)
 	checkRange("title", "title_top_level", rc.TitleTopLevel, 1, 255)
+	checkListRange("title", "title_tier_items", rc.TitleTierItems, 1, 4294967295)
 
 	// A century is the ceiling: the expiry is carried as a unix second count, and
 	// a term beyond that would push the stored date past any year the client can
@@ -170,6 +171,17 @@ func validateRuntimeConfig(dec *foundationconfig.Decoder, rc RuntimeConfig) erro
 	checkRange("scheduler", "breaker_release_batch", rc.SchedulerBreakerReleaseBatch, 1, 120)
 	checkRange("scheduler", "breaker_floor_percent", rc.SchedulerBreakerFloorPct, 0, 100)
 	checkRange("scheduler", "port_down_release_batch", rc.SchedulerPortDownReleaseBatch, 1, 120)
+	checkRange("scheduler", "offline_release_batch", rc.SchedulerOfflineReleaseBatch, 1, 120)
+	checkRange("scheduler", "offline_release_gap_sec", rc.SchedulerOfflineReleaseGapSec, 1, 3600)
+
+	residentRows, residentErr := ParseResidentPlan(rc.ResidentPlan)
+	if residentErr != nil {
+		dec.Check("demand", "resident_plan", false, residentErr.Error())
+	} else {
+		dec.Check("demand", "resident_plan", ResidentPlanSize(residentRows) <= PoolCapacity(rc), "must not ask for more standing robots than the fleet can hold")
+	}
+	checkRange("demand", "player_poll_sec", rc.DemandPlayerPollSec, 1, 300)
+	checkRange("demand", "player_grace_sec", rc.DemandPlayerGraceSec, 0, 86400)
 
 	checkRange("system", "actor_poll_ms", rc.SystemActorPollMS, 100, 10000)
 	checkRange("system", "manual_action_timeout_sec", rc.SystemManualActionTimeoutSec, 1, 3600)

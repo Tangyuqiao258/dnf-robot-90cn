@@ -5,6 +5,14 @@ type RuntimeConfig struct {
 	LevelMax                 int    `json:"level_max"`
 	LevelPlan                string `json:"level_plan"`
 	PoolSize                 int    `json:"pool_size"`
+	// Demand (需求) policy. The fleet is no longer "the first N robots in uid
+	// order": ResidentPlan names the maps a standing crowd always occupies, and
+	// the robots that follow the player fill the rest of the online budget. An
+	// empty plan keeps the plain behaviour, where every robot is logged in on the
+	// map the spawn rules pick for it.
+	ResidentPlan         string `json:"resident_plan"`
+	DemandPlayerPollSec  int    `json:"demand_player_poll_sec"`
+	DemandPlayerGraceSec int    `json:"demand_player_grace_sec"`
 	Jobs                     []int  `json:"jobs"`
 	GrowTypes                []int  `json:"grow_types"`
 	ReconcileAwakening       bool   `json:"reconcile_awakening"`
@@ -67,6 +75,10 @@ type RuntimeConfig struct {
 	TitleItem     int  `json:"title_item"`
 	TitleTopItem  int  `json:"title_top_item"`
 	TitleTopLevel int  `json:"title_top_level"`
+	// TitleTierItems turns the pin into a rank: when it lists more than one id,
+	// every robot below TitleTopLevel draws one of them, which is the operator's
+	// "一档随机发放". An empty list keeps the single TitleItem pin.
+	TitleTierItems []int `json:"title_tier_items"`
 	// Premium contracts (契约/会员). These are the account-level entitlements the
 	// game server keeps as an absolute expiry per premium type in the account
 	// metadata table, so the fleet is granted a date rather than an item.
@@ -191,6 +203,13 @@ type RuntimeConfig struct {
 	SchedulerOnlineBreakerPauseSec int `json:"scheduler_online_breaker_pause_sec"`
 	SchedulerCreateBatchSize       int `json:"scheduler_create_batch_size"`
 	SchedulerScaleDownBatch        int `json:"scheduler_scale_down_batch"`
+	// Offline release pacing. A robot the demand layer stops wanting is logged
+	// out for real -- the session is closed and the lease released -- so the
+	// sweep runs in small batches with a pause between them instead of closing
+	// a whole layer at once. The pause is what keeps a re-shuffle from reading
+	// as a mass disconnect to the server's login path.
+	SchedulerOfflineReleaseBatch  int `json:"scheduler_offline_release_batch"`
+	SchedulerOfflineReleaseGapSec int `json:"scheduler_offline_release_gap_sec"`
 	SystemActorPollMS              int `json:"system_actor_poll_ms"`
 	SystemManualActionTimeoutSec   int `json:"system_manual_action_timeout_sec"`
 	SystemPacketRatePerSec         int `json:"system_packet_rate_per_sec"`

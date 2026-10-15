@@ -67,6 +67,8 @@ func Default() RuntimeConfig {
 		SchedulerBreakerAbnormalPct: 30, SchedulerBreakerPauseSec: 300, SchedulerBreakerReleaseBatch: 20, SchedulerBreakerFloorPct: 70, SchedulerPortDownReleaseBatch: 20,
 		SchedulerOnlineRetryBaseMS: 5000, SchedulerOnlineRetryMaxMS: 300000, SchedulerOnlineRetryJitterPct: 20, SchedulerOnlineInFlight: 12,
 		SchedulerRecycleCooldownSec: 600, SchedulerOnlineBreakerPauseSec: 60, SchedulerCreateBatchSize: 10, SchedulerScaleDownBatch: 15,
+		SchedulerOfflineReleaseBatch: 5, SchedulerOfflineReleaseGapSec: 5,
+		DemandPlayerPollSec: 5, DemandPlayerGraceSec: 600,
 		SystemActorPollMS: 3000, SystemManualActionTimeoutSec: 60, SystemPacketRatePerSec: 20,
 	}
 }

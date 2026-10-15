@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math/rand"
 	"testing"
@@ -369,6 +370,47 @@ func TestSelectPetChoosesPartialArtifactSet(t *testing.T) {
 	}
 }
 
+// TestSelectPetSkipsUnhatchedEggs covers the operator's crash report: the 90CN
+// client dies when an unhatched 宠物蛋 reaches the creature slot, and the catalog
+// files those eggs under the very same item type as the real creatures.
+func TestSelectPetSkipsUnhatchedEggs(t *testing.T) {
+	items := []shared.EquipmentCatalogItem{
+		{ID: 63006, ItemType: 30, Name: "宠物蛋 (佛拉斯)"},
+		{ID: 63013, ItemType: 30, Name: "宠物蛋 (波堤斯)"},
+		{ID: 63000, ItemType: 30, Name: "佛拉斯"},
+	}
+	rc := robotconfig.RuntimeConfig{PetEnabled: true}
+	// Draw both the first and the last candidate, so an egg left in the pool is
+	// picked whichever way the draw lands.
+	for _, randIntn := range []func(int) int{func(int) int { return 0 }, func(n int) int { return n - 1 }} {
+		pet, _, ok := SelectPet(items, rc, randIntn)
+		if !ok {
+			t.Fatal("no creature selected")
+		}
+		if pet.ID != 63000 {
+			t.Fatalf("selected %#v, want the hatched creature", pet)
+		}
+	}
+	if _, _, ok := SelectPet(items[:2], rc, func(int) int { return 0 }); ok {
+		t.Fatal("a pool of nothing but eggs still produced a creature")
+	}
+}
+
+func TestPetRenderableRejectsEggNames(t *testing.T) {
+	if PetRenderable(shared.EquipmentCatalogItem{ID: 63006, ItemType: 30, Name: "宠物蛋 (佛拉斯)"}) {
+		t.Fatal("an unhatched egg is renderable as a creature")
+	}
+	if PetRenderable(shared.EquipmentCatalogItem{ID: 63006, ItemType: 30, Name2: "宠物蛋 (佛拉斯)"}) {
+		t.Fatal("an egg named only in name2 is renderable as a creature")
+	}
+	if !PetRenderable(shared.EquipmentCatalogItem{ID: 63000, ItemType: 30, Name: "佛拉斯"}) {
+		t.Fatal("a hatched creature was rejected")
+	}
+	if PetRenderable(shared.EquipmentCatalogItem{ID: 310, ItemType: 31, Name: "artifact"}) {
+		t.Fatal("an artifact is renderable as a creature")
+	}
+}
+
 func TestSelectPetCanDisableArtifactsAndPets(t *testing.T) {
 	items := []shared.EquipmentCatalogItem{{ID: 300, ItemType: 30}, {ID: 310, ItemType: 31}}
 	if _, artifacts, ok := SelectPet(items, robotconfig.RuntimeConfig{PetEnabled: true, PetArtifactEnabled: false}, func(n int) int { return 0 }); !ok || len(artifacts) != 0 {
@@ -501,6 +543,55 @@ func testSetCandidates(qualitySlots, varietySlots int) map[int][]shared.Equipmen
 		out[slot] = append(out[slot], shared.EquipmentCatalogItem{ID: 2000 + slot, SetKey: "variety"})
 	}
 	return out
+}
+
+// TestSelectEquipmentFamilySetItemsDrawsLooseAccessories covers the operator's
+// fourth rule: 辅助装备和首饰可以发散件,大概40%的角色发散件,60%的角色发套装. The armor
+// family is outside the draw -- a level-90 robot is owed a five-piece set
+// whatever the coin says.
+func TestSelectEquipmentFamilySetItemsDrawsLooseAccessories(t *testing.T) {
+	candidates := map[int][]shared.EquipmentCatalogItem{}
+	for _, family := range equipmentFamilies {
+		key := fmt.Sprintf("family_%d_set", family[0])
+		for _, slot := range family {
+			candidates[slot] = append(candidates[slot],
+				shared.EquipmentCatalogItem{ID: 1000 + slot, SetKey: key, Level: 90, Rarity: 4},
+				shared.EquipmentCatalogItem{ID: 2000 + slot, SetKey: "", Level: 90, Rarity: 4},
+			)
+		}
+	}
+	for _, testCase := range []struct {
+		draw int
+		loose bool
+	}{
+		{EquipmentLooseAccessoryPercent - 1, true},
+		{EquipmentLooseAccessoryPercent, false},
+	} {
+		draw := testCase.draw
+		randIntn := func(n int) int {
+			if n <= 0 {
+				return 0
+			}
+			return draw % n
+		}
+		selected := SelectEquipmentFamilySetItems(candidates, 2, randIntn)
+		for _, slot := range equipmentFamilies[0] {
+			if selected[slot].SetKey == "" {
+				t.Fatalf("draw %d left armor slot %d out of its set: %+v", draw, slot, selected[slot])
+			}
+		}
+		for _, index := range []int{AccessoryFamilyIndex, SpecialFamilyIndex} {
+			for _, slot := range equipmentFamilies[index] {
+				item, ok := selected[slot]
+				switch {
+				case testCase.loose && ok:
+					t.Fatalf("draw %d dressed loose slot %d from set %q", draw, slot, item.SetKey)
+				case !testCase.loose && (!ok || item.SetKey == ""):
+					t.Fatalf("draw %d left slot %d loose: %+v ok=%t", draw, slot, item, ok)
+				}
+			}
+		}
+	}
 }
 
 func TestBuildSetGroupsSupportsSharedSetItems(t *testing.T) {

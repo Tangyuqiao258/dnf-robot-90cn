@@ -15,7 +15,19 @@ import "strings"
 //     stock, so the fragment is stated by name rather than by item type, which
 //     also keeps it independent of parse order: [name] can be read before
 //     [equipment type].
-var BlockedItemNameFragments = []string{"后续确认", "活动", "租", "克隆"}
+//   - GM: the game-master copies of one 稀有装扮 set (暗黑骑士戾芒头盔 GM and its
+//     seven siblings, 32 records in all). Every one of them is a staff-only
+//     variant, and the fragment is unambiguous: no other record in the live
+//     archive carries the letters, in any case.
+//   - (旧): the superseded copies the archive keeps beside the current ones
+//     ((旧) 棉布长袍 and the records like it). Only the parenthesised marker is
+//     blocked, not the character: 破旧的棉布衬衫 is ordinary starter gear.
+//   - [ and ]: names carrying a bracket, which is how the archive marks a record
+//     belonging to a closed subsystem -- the [网吧] internet-cafe weapons, the
+//     异界 skill-name armour -- and how it truncates a name it could not finish
+//     reading. 20777 records carry an opening bracket and the operator asked for
+//     the whole shape to stay out of the fleet.
+var BlockedItemNameFragments = []string{"后续确认", "活动", "租", "克隆", "GM", "(旧)", "[", "]"}
 
 // ItemNameBlocked reports whether a catalog item name carries a blocked
 // fragment. A nameless record is not this function's business: the catalog

@@ -247,12 +247,12 @@ func SelectEquipment(items []shared.EquipmentCatalogItem, level int, job, grow i
 	}
 	selected := make(map[int]shared.EquipmentCatalogItem)
 	if rc.PreferEquipSets {
-		selected = SelectFamilySetItems(candidatesBySlot, rc.EquipSetMinSlots, randIntn)
+		selected = SelectEquipmentFamilySetItems(candidatesBySlot, rc.EquipSetMinSlots, randIntn)
 	}
 	FillRandomItems(selected, candidatesBySlot, randIntn)
 	// Pinned after the draw so it survives both the set pick and the fill. The
 	// title is not part of the candidate pool: it is named, not chosen.
-	if item, ok := pinnedTitle(level, rc, items); ok {
+	if item, ok := pinnedTitle(level, rc, items, randIntn); ok {
 		selected[titleSlot] = item
 	}
 	return selected
@@ -444,7 +444,7 @@ func PrepareAvatarCatalog(items []shared.EquipmentCatalogItem, rc robotconfig.Ru
 	}
 	for _, candidates := range catalog.jobs {
 		for _, band := range candidates.bands {
-			band.groups = buildSetGroups(band.bySlot)
+			band.groups = buildAvatarSetGroups(band.bySlot)
 		}
 	}
 	return catalog
@@ -525,7 +525,9 @@ func SelectPet(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig
 		}
 		switch item.ItemType {
 		case 30:
-			creatures = append(creatures, item)
+			if PetRenderable(item) {
+				creatures = append(creatures, item)
+			}
 		case 31, 32, 33:
 			if rc.PetArtifactEnabled {
 				if _, ok := allowed[item.ItemType]; ok && PetArtifactRenderable(item) {
@@ -571,6 +573,31 @@ func SelectPet(items []shared.EquipmentCatalogItem, rc robotconfig.RuntimeConfig
 		selected[itemType] = candidates[safeRandIntn(randIntn, len(candidates))]
 	}
 	return pet, selected, true
+}
+
+// petEggNameMarker is the word that marks an unhatched creature. The catalog
+// carries 91 of them next to the real creatures and they share the creature
+// equipment type, so nothing but the name tells them apart.
+const petEggNameMarker = "宠物蛋"
+
+// PetRenderable reports whether a catalog item may be worn as a creature.
+//
+// The egg filter is the operator's: the 90CN client crashes when an unhatched
+// 宠物蛋 is placed in the creature slot, which is exactly the slot a type-30
+// item is written to. A hatched creature carries the same type and the same
+// table, so the name is the only thing that separates the two, and a draw that
+// ignores it hands the client a crash at login.
+func PetRenderable(item shared.EquipmentCatalogItem) bool {
+	if item.ID <= 0 || item.Expire || item.GrantBlocked {
+		return false
+	}
+	if item.ItemType != 30 {
+		return false
+	}
+	if strings.Contains(item.Name, petEggNameMarker) || strings.Contains(item.Name2, petEggNameMarker) {
+		return false
+	}
+	return true
 }
 
 // PetArtifactRenderable rejects malformed item-info fallbacks and
@@ -684,11 +711,13 @@ func equipmentCandidate(item shared.EquipmentCatalogItem, slot, level, job, grow
 		return false
 	}
 	if slot == titleSlot {
-		if id := PinnedTitleItem(level, rc); id > 0 {
+		if ids := TitleTierItemIDs(level, rc); len(ids) > 0 {
 			// Pinned, not drawn, so the job sweep and the rarity band must not
-			// second-guess it: the operator named this item. 天选之人 is a
-			// rarity-6 title and the fleet's band tops out at 5.
-			return item.ID == id
+			// second-guess it: the operator named these items. 天选之人 is a
+			// rarity-6 title and the fleet's band tops out at 5. Every id in the
+			// tier counts, or a robot that drew the second rank would be repaired
+			// on every pass.
+			return TitleAllowed(level, rc, item.ID)
 		}
 		// No pin: slot 2 behaves like any other, so an operator who lists it in
 		// equip_slots keeps the random draw and its band.
@@ -724,7 +753,7 @@ func SelectSetItems(candidatesBySlot map[int][]shared.EquipmentCatalogItem, minS
 }
 
 func SelectAvatarSetItems(candidatesBySlot map[int][]shared.EquipmentCatalogItem, minSlots int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
-	return selectAvatarSetItemsFromGroups(buildSetGroups(candidatesBySlot), minSlots, randIntn)
+	return selectAvatarSetItemsFromGroups(buildAvatarSetGroups(candidatesBySlot), minSlots, randIntn)
 }
 
 func selectAvatarSetItemsFromGroups(groups map[string]*setGroup, minSlots int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
@@ -739,7 +768,7 @@ func selectAvatarSetItemsFromGroups(groups map[string]*setGroup, minSlots int, r
 		}
 	}
 	if len(eligible) == 0 {
-		return selectBestSetItems(groups, minSlots, randIntn)
+		return selectAvatarBestSetItems(groups, minSlots, randIntn)
 	}
 	sort.Slice(eligible, func(i, j int) bool {
 		if eligible[i].coverage != eligible[j].coverage {
@@ -762,14 +791,59 @@ func selectAvatarSetItemsFromGroups(groups map[string]*setGroup, minSlots int, r
 			best = append(best, group)
 		}
 	}
-	return selectSetGroup(best[safeRandIntn(randIntn, len(best))], randIntn)
+	return selectAvatarFamilySet(best[safeRandIntn(randIntn, len(best))], randIntn)
+}
+
+// selectAvatarBestSetItems is selectBestSetItems with the 装扮 materializer, so
+// the fallback below the coverage floor dresses from a name family too.
+func selectAvatarBestSetItems(groups map[string]*setGroup, minSlots int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+	if minSlots <= 1 {
+		minSlots = 2
+	}
+	var best []*setGroup
+	bestScore := -1
+	for _, group := range groups {
+		if group.coverage < minSlots {
+			continue
+		}
+		score := group.coverage*1000000 + SafeAvg(group.levelSum, group.count)*1000 + SafeAvg(group.raritySum, group.count)
+		if score > bestScore {
+			bestScore = score
+			best = []*setGroup{group}
+		} else if score == bestScore {
+			best = append(best, group)
+		}
+	}
+	if len(best) == 0 {
+		return map[int]shared.EquipmentCatalogItem{}
+	}
+	return selectAvatarFamilySet(best[safeRandIntn(randIntn, len(best))], randIntn)
 }
 
 func buildSetGroups(candidatesBySlot map[int][]shared.EquipmentCatalogItem) map[string]*setGroup {
+	return buildSetGroupsByKey(candidatesBySlot, func(item shared.EquipmentCatalogItem) []string {
+		return itemSetKeys(item.SetKey)
+	})
+}
+
+// buildAvatarSetGroups groups 装扮 by the name family the pieces share, falling
+// back to the archive's set key for a piece whose name cannot name a family. The
+// archive's key is useless for 装扮 -- every 稀有装扮 piece of a job carries
+// pvf_part_3 -- so the name is what tells one 天空套 from the next.
+func buildAvatarSetGroups(candidatesBySlot map[int][]shared.EquipmentCatalogItem) map[string]*setGroup {
+	return buildSetGroupsByKey(candidatesBySlot, func(item shared.EquipmentCatalogItem) []string {
+		if family := AvatarFamilyKey(item.Name); family != "" {
+			return []string{family}
+		}
+		return itemSetKeys(item.SetKey)
+	})
+}
+
+func buildSetGroupsByKey(candidatesBySlot map[int][]shared.EquipmentCatalogItem, keysFor func(shared.EquipmentCatalogItem) []string) map[string]*setGroup {
 	groups := make(map[string]*setGroup)
 	for slot, candidates := range candidatesBySlot {
 		for _, item := range candidates {
-			for _, setKey := range itemSetKeys(item.SetKey) {
+			for _, setKey := range keysFor(item) {
 				group := groups[setKey]
 				if group == nil {
 					group = &setGroup{key: setKey, bySlot: make(map[int][]shared.EquipmentCatalogItem)}
@@ -838,6 +912,55 @@ func selectSetGroup(group *setGroup, randIntn func(int) int) map[int]shared.Equi
 			continue
 		}
 		selected[slot] = candidates[safeRandIntn(randIntn, len(candidates))]
+	}
+	return selected
+}
+
+// selectAvatarFamilySet materializes one 装扮 set from a name family: a seed
+// piece is drawn, and every other slot then takes the candidate whose name
+// shares the longest prefix with the seed.
+//
+// Picking at random from the family would mix it with the sets that share its
+// four-character root, and picking at random from the archive's pvf_part_3 group
+// mixes all 稀有装扮 of the job. A group whose pieces carry no usable name is
+// materialized the old way, so a SetKey-grouped pool keeps behaving as it did.
+func selectAvatarFamilySet(group *setGroup, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+	selected := make(map[int]shared.EquipmentCatalogItem)
+	if group == nil {
+		return selected
+	}
+	slots := make([]int, 0, len(group.bySlot))
+	for slot, candidates := range group.bySlot {
+		if len(candidates) > 0 {
+			slots = append(slots, slot)
+		}
+	}
+	if len(slots) == 0 {
+		return selected
+	}
+	sort.Ints(slots)
+	seedSlot := slots[safeRandIntn(randIntn, len(slots))]
+	seed := group.bySlot[seedSlot][safeRandIntn(randIntn, len(group.bySlot[seedSlot]))]
+	if AvatarFamilyKey(seed.Name) == "" {
+		return selectSetGroup(group, randIntn)
+	}
+	selected[seedSlot] = seed
+	for _, slot := range slots {
+		if slot == seedSlot {
+			continue
+		}
+		best, bestAffinity := shared.EquipmentCatalogItem{}, -1
+		for _, item := range group.bySlot[slot] {
+			if affinity := AvatarNameAffinity(seed.Name, item.Name); affinity > bestAffinity {
+				best, bestAffinity = item, affinity
+			}
+		}
+		if bestAffinity < AvatarFamilyMinPrefix {
+			// Nothing in this slot belongs to the seed's own set, so the slot is
+			// left to the random fill rather than dressed from a stranger's set.
+			continue
+		}
+		selected[slot] = best
 	}
 	return selected
 }

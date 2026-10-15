@@ -100,6 +100,7 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.TitleItem = dec.Int("title", "title_item", rc.TitleItem)
 	rc.TitleTopItem = dec.Int("title", "title_top_item", rc.TitleTopItem)
 	rc.TitleTopLevel = dec.Int("title", "title_top_level", rc.TitleTopLevel)
+	rc.TitleTierItems = dec.IntList("title", "title_tier_items", rc.TitleTierItems)
 
 	rc.BlackDiamondEnabled = dec.Bool("premium", "black_diamond_enabled", rc.BlackDiamondEnabled)
 	rc.BlackDiamondDays = dec.Int("premium", "black_diamond_days", rc.BlackDiamondDays)
@@ -202,6 +203,12 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.SchedulerOnlineBreakerPauseSec = dec.Int("scheduler", "online_breaker_pause_sec", rc.SchedulerOnlineBreakerPauseSec)
 	rc.SchedulerCreateBatchSize = dec.Int("scheduler", "create_batch_size", rc.SchedulerCreateBatchSize)
 	rc.SchedulerScaleDownBatch = dec.Int("scheduler", "scale_down_batch", rc.SchedulerScaleDownBatch)
+	rc.SchedulerOfflineReleaseBatch = dec.Int("scheduler", "offline_release_batch", rc.SchedulerOfflineReleaseBatch)
+	rc.SchedulerOfflineReleaseGapSec = dec.Int("scheduler", "offline_release_gap_sec", rc.SchedulerOfflineReleaseGapSec)
+
+	rc.ResidentPlan = dec.String("demand", "resident_plan", rc.ResidentPlan)
+	rc.DemandPlayerPollSec = dec.Int("demand", "player_poll_sec", rc.DemandPlayerPollSec)
+	rc.DemandPlayerGraceSec = dec.Int("demand", "player_grace_sec", rc.DemandPlayerGraceSec)
 
 	rc.SystemActorPollMS = dec.Int("system", "actor_poll_ms", rc.SystemActorPollMS)
 	rc.SystemManualActionTimeoutSec = dec.Int("system", "manual_action_timeout_sec", rc.SystemManualActionTimeoutSec)

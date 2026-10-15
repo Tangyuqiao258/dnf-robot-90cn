@@ -70,6 +70,19 @@ func appendWornSlot(slots []int, wanted int) []int {
 	return append(out, wanted)
 }
 
+// EquipmentLooseAccessoryPercent is the share of characters whose 首饰 and 特殊装备
+// are drawn as loose pieces instead of as one set each -- the operator's
+// "大概40%的角色发散件,60%的角色发套装". The armor family is not part of the draw: a
+// level-90 robot is owed a complete five-piece material set.
+const EquipmentLooseAccessoryPercent = 40
+
+// AccessoryFamilyIndex and SpecialFamilyIndex name the two families the draw
+// applies to, as indices into equipmentFamilies.
+const (
+	AccessoryFamilyIndex = 1
+	SpecialFamilyIndex   = 2
+)
+
 // SelectFamilySetItems selects one complete set per equipment family.
 //
 // Within a family the widest set wins, so the family arrives as one set rather
@@ -78,9 +91,29 @@ func appendWornSlot(slots []int, wanted int) []int {
 // (the special-equipment pool at the top band is a few dozen items), and a
 // partial set is closer to what the operator asked for than a random draw.
 func SelectFamilySetItems(candidatesBySlot map[int][]shared.EquipmentCatalogItem, minSlots int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+	return selectFamilySetItems(candidatesBySlot, minSlots, randIntn, nil)
+}
+
+// SelectEquipmentFamilySetItems is SelectFamilySetItems with the operator's
+// loose-piece draw: the 首饰 and 特殊装备 families are left to the caller's random
+// fill for EquipmentLooseAccessoryPercent of characters, and dressed as one set
+// each for the rest.
+func SelectEquipmentFamilySetItems(candidatesBySlot map[int][]shared.EquipmentCatalogItem, minSlots int, randIntn func(int) int) map[int]shared.EquipmentCatalogItem {
+	loose := map[int]bool{}
+	if safeRandIntn(randIntn, 100) < EquipmentLooseAccessoryPercent {
+		loose[AccessoryFamilyIndex] = true
+		loose[SpecialFamilyIndex] = true
+	}
+	return selectFamilySetItems(candidatesBySlot, minSlots, randIntn, loose)
+}
+
+func selectFamilySetItems(candidatesBySlot map[int][]shared.EquipmentCatalogItem, minSlots int, randIntn func(int) int, loose map[int]bool) map[int]shared.EquipmentCatalogItem {
 	groups := buildSetGroups(candidatesBySlot)
 	selected := make(map[int]shared.EquipmentCatalogItem)
-	for _, family := range equipmentFamilies {
+	for index, family := range equipmentFamilies {
+		if loose[index] {
+			continue
+		}
 		wanted := 0
 		for _, slot := range family {
 			if len(candidatesBySlot[slot]) > 0 {

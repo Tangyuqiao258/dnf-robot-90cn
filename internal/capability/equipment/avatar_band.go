@@ -1,5 +1,7 @@
 package equipment
 
+import "strings"
+
 // Avatar bands (时装按等级分档).
 //
 // The operator asked for level-differentiated 时装 — "每个等级发不同的时装,高等级人物
@@ -51,6 +53,52 @@ const (
 	// avatarSlotCeiling is the highest slot an avatar_slots setting may name.
 	avatarSlotCeiling = AvatarAuraSlot
 )
+
+// Avatar set families (同名前缀即一套).
+//
+// The archive's own set key cannot group a 装扮 set. Every 稀有装扮 piece of a job
+// carries the same key -- pvf_part_3 -- so the key names the whole 稀有装扮 family
+// of that job, 279 pieces per slot for a thief, and a set drawn from it puts a
+// helmet from one 天空套 next to a coat from another. The operator's rule is what
+// the archive does say: the pieces of one set are named alike. 暗影魅月魔音头盔,
+// 暗影魅月魔音长发 and 暗影魅月魔音眼妆 are one set, and "前四个字一样的基本就是一套的"
+// is the rule verbatim.
+//
+// The key is therefore the first four characters of the name, and the family is
+// then narrowed to the seed piece's own set: every other slot takes the candidate
+// whose name shares the longest prefix with the seed. Two sets that share a
+// four-character root -- the archive has 62 such collisions -- can therefore
+// never be mixed, because a same-family candidate always shares more.
+const (
+	// AvatarFamilyMinPrefix is how many leading characters name a family.
+	AvatarFamilyMinPrefix = 4
+)
+
+// AvatarFamilyKey returns the set family an avatar name belongs to. A name too
+// short to name a family returns "", and the caller falls back to the archive's
+// set key.
+func AvatarFamilyKey(name string) string {
+	runes := []rune(strings.TrimSpace(name))
+	if len(runes) < AvatarFamilyMinPrefix {
+		return ""
+	}
+	return string(runes[:AvatarFamilyMinPrefix])
+}
+
+// AvatarNameAffinity counts how many leading characters two avatar names share,
+// capped at the shorter of the two.
+func AvatarNameAffinity(left, right string) int {
+	leftRunes, rightRunes := []rune(left), []rune(right)
+	limit := len(leftRunes)
+	if len(rightRunes) < limit {
+		limit = len(rightRunes)
+	}
+	shared := 0
+	for shared < limit && leftRunes[shared] == rightRunes[shared] {
+		shared++
+	}
+	return shared
+}
 
 // AvatarRarityFor returns the 时装 grade a character of this level wears.
 func AvatarRarityFor(level int) int {
