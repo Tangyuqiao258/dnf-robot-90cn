@@ -225,7 +225,11 @@ func (a *Actor) tick(now time.Time) {
 			} else if res.State == robotcap.ActionStateStoreBusy {
 				a.markOnlineHealthy()
 				a.setNextStore(time.Now().Add(time.Duration(rc.AutoStoreFailCooldownSec) * time.Second))
-			} else if res.State == robotcap.ActionStateStoreFailed {
+			} else if res.State == robotcap.ActionStateStoreFailed || res.State == robotcap.ActionStateStoreNoPoint {
+				// A full market earns the same cooldown as a failed store and
+				// nothing more: the session is healthy, so the round must not
+				// fall through to the transport-failure branch below and
+				// quarantine a robot that simply had no pitch to stand on.
 				a.markOnlineHealthy()
 				a.setNextStore(time.Now().Add(time.Duration(rc.AutoStoreFailCooldownSec) * time.Second))
 			} else if res.State != robotcap.ActionStateCancelled {

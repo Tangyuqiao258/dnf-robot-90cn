@@ -96,8 +96,10 @@ type RobotManager struct {
 	schedulerRecentAttemptFailed    int
 	schedulerLastStoreSuccess       int
 	schedulerLastStoreFailed        int
+	schedulerLastStoreNoPoint       int
 	schedulerRecentStoreSuccess     int
 	schedulerRecentStoreFailed      int
+	schedulerRecentStoreNoPoint     int
 	runtimeState                    runtimeStateTable
 	followLookupMu                  lockhub.Locker
 	followLookup                    followAccountLookup

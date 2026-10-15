@@ -129,31 +129,39 @@ type ActionResult struct {
 }
 
 const (
-	ActionStateAccepted           = "accepted"
-	ActionStateActorFull          = "actor_full"
-	ActionStateAttached           = "attached"
-	ActionStateAttachedOffline    = "attached_offline"
-	ActionStateCancelled          = "cancelled"
-	ActionStateClosed             = "closed"
-	ActionStateFailed             = "failed"
-	ActionStateIdle               = "idle"
-	ActionStateLogoutFailed       = "logout_failed"
-	ActionStateMissing            = "missing"
-	ActionStateMissingActor       = "missing_actor"
-	ActionStateMoved              = "moved"
-	ActionStateNoticed            = "noticed"
-	ActionStateNotConfirmed       = "not_confirmed"
-	ActionStateNotOnline          = "not_online"
-	ActionStateOffline            = "offline"
-	ActionStateOnlineTimeout      = "online_timeout"
-	ActionStatePending            = "pending"
-	ActionStateQueueFailed        = "queue_failed"
-	ActionStateRunning            = "running"
-	ActionStateSchedulerBusy      = "scheduler_busy"
-	ActionStateSent               = "sent"
-	ActionStateStore              = "store"
-	ActionStateStoreBusy          = "store_busy"
-	ActionStateStoreFailed        = "store_failed"
+	ActionStateAccepted        = "accepted"
+	ActionStateActorFull       = "actor_full"
+	ActionStateAttached        = "attached"
+	ActionStateAttachedOffline = "attached_offline"
+	ActionStateCancelled       = "cancelled"
+	ActionStateClosed          = "closed"
+	ActionStateFailed          = "failed"
+	ActionStateIdle            = "idle"
+	ActionStateLogoutFailed    = "logout_failed"
+	ActionStateMissing         = "missing"
+	ActionStateMissingActor    = "missing_actor"
+	ActionStateMoved           = "moved"
+	ActionStateNoticed         = "noticed"
+	ActionStateNotConfirmed    = "not_confirmed"
+	ActionStateNotOnline       = "not_online"
+	ActionStateOffline         = "offline"
+	ActionStateOnlineTimeout   = "online_timeout"
+	ActionStatePending         = "pending"
+	ActionStateQueueFailed     = "queue_failed"
+	ActionStateRunning         = "running"
+	ActionStateSchedulerBusy   = "scheduler_busy"
+	ActionStateSent            = "sent"
+	ActionStateStore           = "store"
+	ActionStateStoreBusy       = "store_busy"
+	ActionStateStoreFailed     = "store_failed"
+	// ActionStateStoreNoPoint is a placement failure, not a store failure: the
+	// round found no usable coordinate, so no create was ever sent and the
+	// server was never asked anything. It is reported apart from
+	// ActionStateStoreFailed because the two have opposite remedies -- a full
+	// market needs more room, a failing store needs the server looked at -- and
+	// because a round that never reached the wire says nothing about the
+	// server's health.
+	ActionStateStoreNoPoint       = "store_no_point"
 	ActionStateStorePrepareFailed = "store_prepare_failed"
 	ActionStateStoreStartFailed   = "store_start_failed"
 	ActionStateStoreExpired       = "store_expired"
@@ -297,41 +305,46 @@ func IsStructuralOperation(typ string) bool {
 }
 
 type AutoStatus struct {
-	Enabled               bool      `json:"enabled"`
-	TargetOnline          int       `json:"target_online"`
-	Actors                int       `json:"actors"`
-	Leased                int       `json:"leased"`
-	Idle                  int       `json:"idle"`
-	Recycling             int       `json:"recycling"`
-	BlockedUIDs           int       `json:"blocked_uids"`
-	ActorIdle             int       `json:"actor_idle"`
-	ActorAssigned         int       `json:"actor_assigned"`
-	ActorOnline           int       `json:"actor_online"`
-	ActorRunning          int       `json:"actor_running"`
-	ActorBusy             int       `json:"actor_busy"`
-	ActorReleasing        int       `json:"actor_releasing"`
-	Running               int       `json:"running"`
-	Connecting            int       `json:"connecting"`
-	GamePortReady         bool      `json:"game_port_ready"`
-	GamePortAddress       string    `json:"game_port_address,omitempty"`
-	GamePortStableAt      time.Time `json:"game_port_stable_at,omitempty"`
-	StoreProbability      int       `json:"store_probability_percent"`
-	StoreRunning          int       `json:"store_running"`
-	StoreItemRunning      int       `json:"store_item_running"`
-	StoreDisjointRunning  int       `json:"store_disjoint_running"`
-	StoreEnchantRunning   int       `json:"store_enchant_running"`
-	Created               int       `json:"created"`
-	OnlineSuccess         int       `json:"online_success"`
-	OnlineFailed          int       `json:"online_failed"`
-	MoveSuccess           int       `json:"move_success"`
-	MoveFailed            int       `json:"move_failed"`
-	ShoutLocalSuccess     int       `json:"shout_local_success"`
-	ShoutLocalFailed      int       `json:"shout_local_failed"`
-	ShoutWorldSuccess     int       `json:"shout_world_success"`
-	ShoutWorldFailed      int       `json:"shout_world_failed"`
-	StoreSuccess          int       `json:"store_success"`
-	StoreFailed           int       `json:"store_failed"`
-	StoreExpired          int       `json:"store_expired"`
+	Enabled              bool      `json:"enabled"`
+	TargetOnline         int       `json:"target_online"`
+	Actors               int       `json:"actors"`
+	Leased               int       `json:"leased"`
+	Idle                 int       `json:"idle"`
+	Recycling            int       `json:"recycling"`
+	BlockedUIDs          int       `json:"blocked_uids"`
+	ActorIdle            int       `json:"actor_idle"`
+	ActorAssigned        int       `json:"actor_assigned"`
+	ActorOnline          int       `json:"actor_online"`
+	ActorRunning         int       `json:"actor_running"`
+	ActorBusy            int       `json:"actor_busy"`
+	ActorReleasing       int       `json:"actor_releasing"`
+	Running              int       `json:"running"`
+	Connecting           int       `json:"connecting"`
+	GamePortReady        bool      `json:"game_port_ready"`
+	GamePortAddress      string    `json:"game_port_address,omitempty"`
+	GamePortStableAt     time.Time `json:"game_port_stable_at,omitempty"`
+	StoreProbability     int       `json:"store_probability_percent"`
+	StoreRunning         int       `json:"store_running"`
+	StoreItemRunning     int       `json:"store_item_running"`
+	StoreDisjointRunning int       `json:"store_disjoint_running"`
+	StoreEnchantRunning  int       `json:"store_enchant_running"`
+	Created              int       `json:"created"`
+	OnlineSuccess        int       `json:"online_success"`
+	OnlineFailed         int       `json:"online_failed"`
+	MoveSuccess          int       `json:"move_success"`
+	MoveFailed           int       `json:"move_failed"`
+	ShoutLocalSuccess    int       `json:"shout_local_success"`
+	ShoutLocalFailed     int       `json:"shout_local_failed"`
+	ShoutWorldSuccess    int       `json:"shout_world_success"`
+	ShoutWorldFailed     int       `json:"shout_world_failed"`
+	StoreSuccess         int       `json:"store_success"`
+	StoreFailed          int       `json:"store_failed"`
+	StoreExpired         int       `json:"store_expired"`
+	// StoreNoPoint counts the rounds that ended because no coordinate was
+	// claimable. It sits outside StoreFailed so the failure rate the operator
+	// reads, and the pressure rule that throttles the store rotation, describe
+	// the store and not the size of the market it had to fit into.
+	StoreNoPoint          int       `json:"store_no_point"`
 	ServerNoticeEnabled   bool      `json:"server_notice_enabled"`
 	ServerNoticeSent      int       `json:"server_notice_sent"`
 	ServerNoticeBroadcast int       `json:"server_notice_broadcast"`

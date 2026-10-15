@@ -326,6 +326,10 @@ func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, sh
 	var failureState storecap.AttemptFailureState
 	reuseSession := false
 	setAreaStalls := 0
+	// attempted records whether any coordinate reached the wire. A round that
+	// never got one has no store result to report at all: it is a placement
+	// outcome, and it is counted and returned as one below.
+	attempted := false
 	allowedPosition := r.storePointAllowed(info, kind)
 	// Adapters whose server cannot confirm cross-town transitions restrict the
 	// point pool to the robot's current town.
@@ -343,6 +347,14 @@ func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, sh
 		}
 		pos, ok := r.claimStorePoint(points, uid, rc, info, allowedPosition)
 		if !ok {
+			// The pool ran dry for this town: every coordinate was taken, or the
+			// crowd rules refused every map that holds one. Naming it matters,
+			// because this ending used to be silent -- the round fell through to
+			// the generic cleanup reason, so a fleet with nowhere left to stand
+			// was indistinguishable in the log from a disassembler that kept
+			// breaking, and the two need opposite remedies.
+			robotLogf("[STORE_NO_POINT] uid=%d cid=%d kind=%s village=%d area=%d area_has_points=%t try=%d/%d\n",
+				uid, info.CID, kind.Name(), info.Village, info.Area, points.HasArea(info.Village, info.Area), try, tries)
 			break
 		}
 		info.Village, info.Area, info.X, info.Y = pos.Village, pos.Area, pos.X, pos.Y
@@ -361,6 +373,7 @@ func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, sh
 			points.Flush()
 			break
 		}
+		attempted = true
 		var reason string
 		if reuseSession {
 			ok, reason = r.tryExpertStorePositionInCurrentSession(info, kind, shouldStop)
@@ -405,6 +418,16 @@ func (r *RobotRuntime) autoExpertJobStore(uid int, st robotcap.RuntimeStatus, sh
 	}
 	points.CommitAttemptFailure(uid, &failureState)
 	points.Flush()
+	if !attempted {
+		// Nothing reached the wire, so there is no store result to report. The
+		// round is closed out as a placement failure: the pool had no coordinate
+		// this town could use. Reporting it as a store failure would misdescribe
+		// the market as a broken machine and, through the store failure window,
+		// arm a rule meant to read the server's health.
+		r.cleanupStoreSession(info, rc, "no_store_point")
+		r.manager.addAutoStoreNoPoint(1)
+		return robotcap.ActionResult{UID: uid, CID: info.CID, OK: false, State: robotcap.ActionStateStoreNoPoint}
+	}
 	r.cleanupStoreSession(info, rc, expertJobFailedReason(kind))
 	r.manager.addAutoStore(0, 1, 0)
 	return robotcap.ActionResult{UID: uid, CID: info.CID, OK: false, State: robotcap.ActionStateStoreFailed}

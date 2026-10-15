@@ -79,6 +79,7 @@ func TestActionStateConstants(t *testing.T) {
 		ActionStateStore:              "store",
 		ActionStateStoreBusy:          "store_busy",
 		ActionStateStoreFailed:        "store_failed",
+		ActionStateStoreNoPoint:       "store_no_point",
 		ActionStateStorePrepareFailed: "store_prepare_failed",
 		ActionStateStoreStartFailed:   "store_start_failed",
 		ActionStateStoreExpired:       "store_expired",
