@@ -18,6 +18,7 @@ type partyWaitRuntime struct {
 	shouts   int
 	stores   int
 	expires  int
+	exits    int
 }
 
 func (r *partyWaitRuntime) Config() robotconfig.RuntimeConfig { return r.config }
@@ -86,6 +87,7 @@ func (r *partyWaitRuntime) AutoPartyDungeonEnter(uid int) robotcap.ActionResult 
 	return robotcap.ActionResult{UID: uid}
 }
 func (r *partyWaitRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
+	r.exits++
 	return robotcap.ActionResult{UID: uid}
 }
 func (r *partyWaitRuntime) AutoServerNotice(uid int, _ func() bool) robotcap.ActionResult {
@@ -150,5 +152,44 @@ func TestPartyActiveActorUsesLiveStateAndWaits(t *testing.T) {
 	}
 	if a.nextMove.IsZero() || a.nextShout.IsZero() || a.nextStore.IsZero() {
 		t.Fatal("leaving party did not restart automatic schedules")
+	}
+}
+
+// TestPartyActiveActorStillRunsThePartyExitDuty is the regression for the fleet
+// freeze of 2026-10-16: the party guard returned before the exit duty, so a
+// robot in a fleet party never ran it -- and a fleet party's roster lasts for as
+// long as its members stand in the dungeon, so every member stayed in the run
+// it was dragged into, with no round left that could take it out.
+func TestPartyActiveActorStillRunsThePartyExitDuty(t *testing.T) {
+	runtime := &partyWaitRuntime{
+		config: robotconfig.RuntimeConfig{
+			AutoActions:                 true,
+			AutoPartyDungeon:            true,
+			AutoMoveIntervalMinSec:      1,
+			AutoMoveIntervalMaxSec:      1,
+			AutoShoutIntervalMinSec:     1,
+			AutoShoutIntervalMaxSec:     1,
+			AutoStoreIntervalMinSec:     1,
+			AutoStoreIntervalMaxSec:     1,
+			AutoStoreProbabilityPercent: 100,
+		},
+		status: robotcap.RuntimeStatus{UID: 7, StateName: robotcap.RuntimeStateRunning},
+		party:  true,
+	}
+	a := NewActor(1, ModeAuto, runtime)
+	a.resetForUID(7)
+	now := time.Now()
+	a.nextPartyExit = now.Add(-time.Second)
+	a.nextMove = now.Add(-time.Second)
+	a.nextShout = now.Add(-time.Second)
+	a.nextStore = now.Add(-time.Second)
+	a.storeUntil = now.Add(-time.Second)
+
+	a.tick(now)
+	if runtime.exits != 1 {
+		t.Fatalf("party actor skipped the exit duty: exits=%d", runtime.exits)
+	}
+	if runtime.moves != 0 || runtime.shouts != 0 || runtime.stores != 0 || runtime.expires != 0 {
+		t.Fatalf("party actor ran solo rounds: moves=%d shouts=%d stores=%d expires=%d", runtime.moves, runtime.shouts, runtime.stores, runtime.expires)
 	}
 }

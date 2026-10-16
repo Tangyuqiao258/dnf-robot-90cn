@@ -177,6 +177,26 @@ func (a *Actor) tick(now time.Time) {
 	}
 	a.markOnlineHealthy()
 	a.setState(StateRunning)
+	// The exit duty is the one round the party guard below does not silence, so
+	// it sits above that guard with its own copy of the automatic gate the solo
+	// rounds sit behind. A robot inside a live party is exactly the robot this
+	// duty exists to take back out of a run -- and a fleet party's roster lasts
+	// for as long as its members stand in the dungeon, so a guard that returned
+	// first would park every one of them there for good, which is what it did
+	// before this round moved up. It is the one round that runs for a stall as
+	// well: a robot left inside a run is a robot nothing else in the fleet can
+	// help, and leaving a run is not a scene change a stall has to survive.
+	if a.modeValue() == ModeAuto && a.runtime.AutoActionsEnabled(rc) && a.nextPartyExitDue(now, rc) {
+		var res robotcap.ActionResult
+		a.runBusy("party_exit", func() {
+			res = a.runtime.AutoPartyDungeonExit(uid)
+		})
+		if res.OK {
+			foundationlog.Robotf("[Actor] party_exit slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		} else if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] party_exit_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
 	if st.PartyActive || a.runtime.PartyActive(uid) {
 		a.clearAutoActionSchedule()
 		return
@@ -315,20 +335,6 @@ func (a *Actor) tick(now time.Time) {
 			foundationlog.Robotf("[Actor] party_dungeon slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
 		} else if res.State == robotcap.ActionStateFailed {
 			foundationlog.Robotf("[Actor] party_dungeon_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
-		}
-	}
-	// The exit duty is the one round that runs for a stall as well: a robot left
-	// inside a run is a robot nothing else in the fleet can help, and leaving a
-	// run is not a scene change a stall has to survive.
-	if a.nextPartyExitDue(now, rc) {
-		var res robotcap.ActionResult
-		a.runBusy("party_exit", func() {
-			res = a.runtime.AutoPartyDungeonExit(uid)
-		})
-		if res.OK {
-			foundationlog.Robotf("[Actor] party_exit slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
-		} else if res.State == robotcap.ActionStateFailed {
-			foundationlog.Robotf("[Actor] party_exit_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
 		}
 	}
 	if !isStore && a.nextMoveDue(now, rc) {
