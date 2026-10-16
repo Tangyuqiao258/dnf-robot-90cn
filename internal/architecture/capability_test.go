@@ -96,7 +96,13 @@ var webCapabilityIndexPattern = regexp.MustCompile(`backendCapabilities\[\s*'([^
 // statement. The two buttons that choose between a broadcast and a directed
 // capability pick their literal inside a ternary, so the whole statement has to
 // be read rather than a single literal after the equals sign.
-var webCapabilityAssignmentPattern = regexp.MustCompile(`\bcap=([^;]*);`)
+//
+// The first character may not be '>', which keeps it to an assignment: an
+// arrow callback named cap, as in `.map(cap=>backendCapabilities[cap])`, also
+// contains "cap=" and would otherwise run to the next semicolon and hand every
+// literal in the statement -- i18n keys, HTML attributes, 'false' -- to the
+// catalog check as if each were a capability name.
+var webCapabilityAssignmentPattern = regexp.MustCompile(`\bcap=([^;>][^;]*);`)
 
 var webQuotedLiteralPattern = regexp.MustCompile(`'([^']*)'`)
 
