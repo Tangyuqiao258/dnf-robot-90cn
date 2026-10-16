@@ -819,9 +819,11 @@ func (r *RobotRuntime) partyCandidates(uid, selfCharacterID, village, area, limi
 // somebody: the fleet forms parties of its own, so it has to be able to end
 // them, or the members stand frozen in town for as long as the party exists.
 //
-// The party is only ever ended when every member is one of this fleet's online
-// robots. A party holding a character the fleet does not run is somebody else's,
-// and the robots in it were asked to be there.
+// The party is only ever ended, and its run only ever left, when every member is
+// one of this fleet's online robots. A party holding a character the fleet does
+// not run is somebody else's, and the robots in it were asked to be there: the
+// run is that character's too, so a robot that walked out of it would leave them
+// standing inside alone.
 func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 	return r.run(uid, func() robotcap.ActionResult {
 		st, ok := r.Status(uid)
@@ -836,6 +838,9 @@ func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 		if !ok {
 			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party_dungeon_unsupported"}
 		}
+		// The party decides both halves of the duty, so it is read before either
+		// of them is touched.
+		members, known := party.PartyMembers(uid)
 		leftRun := false
 		if active, selfStarted, since := party.DungeonState(uid); active {
 			// The hold is measured from the run, not from this tick, so a robot the
@@ -845,13 +850,18 @@ func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 			if hold > 0 && !since.IsZero() && time.Since(since) < hold {
 				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "dungeon_hold"}
 			}
+			if !known || !r.partyIsFleet(members) {
+				// The run belongs to a party the fleet does not own, so it is not the
+				// fleet's to leave. The robot was asked into it and stays for as long as
+				// that party keeps it.
+				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "dungeon_foreign_party"}
+			}
 			if err := party.LeaveDungeon(uid); err != nil {
 				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed,
 					Message: fmt.Sprintf("dungeon exit failed: %v (started by this robot: %t)", err, selfStarted)}
 			}
 			leftRun = true
 		}
-		members, known := party.PartyMembers(uid)
 		if !known || len(members) <= 1 {
 			if leftRun {
 				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent, Message: "dungeon_exited"}

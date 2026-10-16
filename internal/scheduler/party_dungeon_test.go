@@ -308,6 +308,30 @@ func TestAutoPartyDungeonExitKeepsAPartyAStrangerIsIn(t *testing.T) {
 	}
 }
 
+// TestAutoPartyDungeonExitStaysInARunAStrangerIsIn is the run half of the rule
+// above: character 5000 is not one of this fleet's robots, so the run is theirs
+// as much as the robot's, and a robot walking out would leave them standing
+// inside alone.
+func TestAutoPartyDungeonExitStaysInARunAStrangerIsIn(t *testing.T) {
+	transport := &partyRunTransport{
+		runActive: true,
+		runSince:  time.Now().Add(-5 * time.Minute),
+		roster:    []int{700, 5000},
+	}
+	runtime := partyRunManager(t, transport)
+
+	result := runtime.AutoPartyDungeonExit(7)
+	if result.State != robotcap.ActionStateCancelled || result.Message != "dungeon_foreign_party" {
+		t.Fatalf("result = %s/%s want a cancelled dungeon_foreign_party", result.State, result.Message)
+	}
+	if len(transport.leftRuns) != 0 {
+		t.Fatalf("a run holding a stranger was left: %v", transport.leftRuns)
+	}
+	if len(transport.leftParties) != 0 {
+		t.Fatalf("a party holding a stranger was left: %v", transport.leftParties)
+	}
+}
+
 func TestAutoPartyDungeonExitDoesNothingOutsideAParty(t *testing.T) {
 	transport := &partyRunTransport{roster: []int{700}}
 	runtime := partyRunManager(t, transport)
