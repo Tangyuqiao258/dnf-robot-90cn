@@ -350,6 +350,13 @@ func (a *Actor) clearAutoSchedule() {
 	a.clearAutoScheduleLocked()
 }
 
+// clearAutoActionSchedule silences the rounds a party silences. nextPartyExit
+// is deliberately not one of them: the exit duty runs above the party guard, so
+// zeroing its timer here would hand it a fresh 15-30s on every tick the guard
+// returns on -- and the guard returns on every tick a party stands in a run --
+// which leaves the duty never due and the party never out. It keeps its own
+// cadence for as long as the robot lives; clearAutoSchedule, the full session
+// reset, is what puts it back.
 func (a *Actor) clearAutoActionSchedule() {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
@@ -361,7 +368,6 @@ func (a *Actor) clearAutoActionSchedule() {
 	a.nextEmote = time.Time{}
 	a.nextDungeonEnter = time.Time{}
 	a.nextPartyDungeon = time.Time{}
-	a.nextPartyExit = time.Time{}
 	a.nextServerNotice = time.Time{}
 }
 

@@ -160,6 +160,12 @@ func TestPartyActiveActorUsesLiveStateAndWaits(t *testing.T) {
 // robot in a fleet party never ran it -- and a fleet party's roster lasts for as
 // long as its members stand in the dungeon, so every member stayed in the run
 // it was dragged into, with no round left that could take it out.
+//
+// It ticks twice on purpose. The duty paces itself, and the guard below it used
+// to clear that pacing together with the solo rounds, so a single tick proved
+// nothing: the duty ran whenever a test handed it a due time, while in the fleet
+// every tick the guard returned on handed it a fresh interval instead, leaving
+// it never due at all. The second tick is what tells those two apart.
 func TestPartyActiveActorStillRunsThePartyExitDuty(t *testing.T) {
 	runtime := &partyWaitRuntime{
 		config: robotconfig.RuntimeConfig{
@@ -179,13 +185,16 @@ func TestPartyActiveActorStillRunsThePartyExitDuty(t *testing.T) {
 	a := NewActor(1, ModeAuto, runtime)
 	a.resetForUID(7)
 	now := time.Now()
-	a.nextPartyExit = now.Add(-time.Second)
 	a.nextMove = now.Add(-time.Second)
 	a.nextShout = now.Add(-time.Second)
 	a.nextStore = now.Add(-time.Second)
 	a.storeUntil = now.Add(-time.Second)
 
 	a.tick(now)
+	if runtime.exits != 0 {
+		t.Fatalf("exit duty ran before it was due: exits=%d", runtime.exits)
+	}
+	a.tick(now.Add((partyExitIntervalMaxSec + 1) * time.Second))
 	if runtime.exits != 1 {
 		t.Fatalf("party actor skipped the exit duty: exits=%d", runtime.exits)
 	}
