@@ -26,6 +26,9 @@ type Client struct {
 	headerSize   int
 	maxSize      int
 	writeTimeout time.Duration
+	// partyUDP is the party P2P transport state. It always exists; the UDP
+	// socket inside it is bound only once RegisterPartyUDPEndpoint succeeds.
+	partyUDP *partyUDPState
 }
 
 // Dial opens a game-channel connection. The address must be the channel game
@@ -49,6 +52,7 @@ func NewClient(conn net.Conn) *Client {
 		headerSize:   upperHeaderSize16,
 		maxSize:      DefaultMaxPacketSize,
 		writeTimeout: defaultWriteTimeout,
+		partyUDP:     newPartyUDPState(),
 	}
 }
 
@@ -65,7 +69,11 @@ func (c *Client) SetUpperHeaderSize(size int) {
 }
 
 func (c *Client) Close() error {
-	if c == nil || c.conn == nil {
+	if c == nil {
+		return nil
+	}
+	c.partyUDP.close()
+	if c.conn == nil {
 		return nil
 	}
 	return c.conn.Close()

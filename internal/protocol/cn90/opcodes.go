@@ -10,7 +10,12 @@ import (
 // reclassified by the server's stream splitter as raw upper requests, but the
 // outbound frame layout stays the legacy one.
 const (
-	CmdEndpointRequest    uint16 = 1
+	CmdEndpointRequest uint16 = 1
+	// CmdSetUDPIPPort is the current client's class-1/op2 SET_UDP_IP_PORT
+	// report: the dynamic P2P UDP endpoint that class0/op11 PARTY_IP_INFO
+	// hands to the other party members. The server recognizes it by the exact
+	// 31-byte current-EXE body; see setUDPIPPortBody.
+	CmdSetUDPIPPort       uint16 = 2
 	CmdExit               uint16 = 3
 	CmdSelectCharacter    uint16 = 4
 	CmdCreateCharacter    uint16 = 5
@@ -121,8 +126,13 @@ const (
 	NotiTradeCancel     uint16 = 16
 	NotiTradeState      uint16 = 17
 	NotiTradeFinish     uint16 = 18
-	NotiUserPosition    uint16 = 0x0016
-	NotiUserArea        uint16 = 0x0017
+	// NotiPartyPeerEndpoints is the class-0/0x000B PARTY_IP_INFO exchange. It
+	// carries one 22-byte row per member with the UDP endpoint that member
+	// should be reached on; the party HUD keeps a peer on "connecting" until
+	// the P2P handshake to that endpoint completes.
+	NotiPartyPeerEndpoints uint16 = 0x000B
+	NotiUserPosition       uint16 = 0x0016
+	NotiUserArea           uint16 = 0x0017
 	NotiSceneTransition uint16 = 24
 	// NotiPartyMemberRealtime is the class-0/0x0099 PARTY_MEMBER_REALTIME_INFO
 	// roster. The server sends it to every member of a runtime party whenever

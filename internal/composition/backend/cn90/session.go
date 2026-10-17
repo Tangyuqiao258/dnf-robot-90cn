@@ -194,6 +194,17 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	if err != nil {
 		return nil, fmt.Errorf("90CN select character: %w", err)
 	}
+	// The party HUD keeps every peer row on "connecting" until the P2P UDP
+	// handshake to that peer completes. The current client reports its dynamic
+	// UDP endpoint on class1/op2 and answers every party peer's TQOS control
+	// frames; bind and report this session's endpoint now, so the party
+	// exchange that starts later has a reachable peer on this side. A failure
+	// only costs the HUD its peer link, never the session.
+	if port, err := client.RegisterPartyUDPEndpoint(openCtx, selfCharacterID); err != nil {
+		foundationlog.Robotf("CN90_PARTY_UDP_REGISTER_FAILED cid=%d err=%v\n", selfCharacterID, err)
+	} else {
+		foundationlog.Robotf("CN90_PARTY_UDP_REGISTERED cid=%d port=%d\n", selfCharacterID, port)
+	}
 	// A completed character must acknowledge the initial town checkpoint so
 	// the server commits the town actor and transition before op35/op36 are
 	// owned by the scene.
@@ -250,6 +261,10 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	if request.EnablePartyAutoAccept || request.EnablePartyFollow || request.EnablePartyInvite {
 		session.startPartyRoster(runCtx)
 	}
+	// The P2P transport runs for every session: the endpoint is already
+	// registered, and feeding it costs nothing until a party exchange sends
+	// op153/op11.
+	session.startPartyUDP(runCtx)
 	// The run and death state is tracked for every session: it is what tells the
 	// runtime whether a dungeon command is meaningful at all, and recording it
 	// costs nothing. Only the revive worker writes to the socket, and only when
