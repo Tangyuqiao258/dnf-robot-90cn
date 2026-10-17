@@ -91,6 +91,12 @@ type dungeonState struct {
 	// into a run it never asked for, and how long it should stand in one is
 	// measured from the run rather than from whenever its own timer fires.
 	since time.Time
+	// followed is true when the server pulled this session into a run it did
+	// not open itself: the follower learns of the run from the op28/op29
+	// projections alone, without ever seeing an op16 acknowledgement. That is
+	// the exact split between "the server owns this walk" and "this session is
+	// the walk's leader", and only a follower runs the room hunt duty.
+	followed bool
 	// room is the latest op29 projection of the room the character stands in.
 	// The clearing client reads the room's actors and neighbours from it; the
 	// maze itself is never announced, so the room projection is the only map
@@ -109,6 +115,10 @@ type dungeonState struct {
 	// startDungeonSettlement and is nil for sessions that never start it, so a
 	// signal is safe from any observer.
 	settleQueue chan struct{}
+	// roomQueue wakes the follower hunt worker on every room projection. It is
+	// set once per session by startDungeonFollowDuty and is nil otherwise, so
+	// the signal is safe from any observer.
+	roomQueue chan struct{}
 	// The post-settlement handshake state. The server walks the result page as
 	// a client-driven chain - op46, op123, op69, op70 - and silently drops the
 	// op42 exit until every step is on its side, so each step is recorded here:
@@ -127,6 +137,17 @@ type dungeonState struct {
 }
 
 func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
+	st.beginRun(dungeonID, difficulty, false)
+}
+
+// markFollowed records a run this session was pulled into by the server. A
+// follower never sends op16, so the op28/op29 projections are the whole
+// evidence of the run, and the run's leader stays the character that opened it.
+func (st *dungeonState) markFollowed() {
+	st.beginRun(0, 0, true)
+}
+
+func (st *dungeonState) beginRun(dungeonID uint32, difficulty byte, followed bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.active = true
@@ -134,6 +155,7 @@ func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
 	st.difficulty = difficulty
 	st.dead = false
 	st.loaded = false
+	st.followed = followed
 	st.since = time.Now()
 	st.room = protocol.DungeonStartMap{}
 	st.hasRoom = false
@@ -153,6 +175,7 @@ func (st *dungeonState) markLeft() {
 	st.difficulty = 0
 	st.dead = false
 	st.loaded = false
+	st.followed = false
 	st.since = time.Time{}
 	st.room = protocol.DungeonStartMap{}
 	st.hasRoom = false
@@ -197,10 +220,25 @@ func (st *dungeonState) startedAt() time.Time {
 // lands on a layered room can be answered by the same coordinate.
 func (st *dungeonState) markRoom(view protocol.DungeonStartMap) {
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	st.room = view
 	st.hasRoom = true
 	st.roomSeq++
+	queue := st.roomQueue
+	st.mu.Unlock()
+	if queue != nil {
+		select {
+		case queue <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// followState reports whether a run is active and, when it is, whether the
+// server put this session in it rather than this session opening it.
+func (st *dungeonState) followState() (active bool, followed bool) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.active, st.followed
 }
 
 // roomSnapshot returns the latest room projection and its sequence.
@@ -402,6 +440,11 @@ func (s *Session) startDungeonTracking(ctx context.Context) {
 	// be pulled into one, follower included, and it never writes without the
 	// op31 entry that opens a completed run.
 	s.startDungeonSettlement(ctx)
+	// The follower hunt duty is part of tracking for the same reason: a
+	// follower is moved through the leader's rooms by the server and has no
+	// other turn that would clear them, and the duty never writes unless the
+	// server itself put this session in someone else's run.
+	s.startDungeonFollowDuty(ctx)
 }
 
 // startDungeonRevive runs the worker that answers a death notice with an op41
@@ -487,7 +530,10 @@ func (s *Session) observeDungeon(packet protocol.Packet) {
 		// that does not know it is in one stays in the dungeon until its session
 		// ends.
 		if active, _, _, _ := state.snapshot(); !active {
-			state.markActive(0, 0)
+			// This session never sent op16 for this run, so the server put it
+			// here on someone else's walk. The flag is what separates a follower
+			// from the run's leader for the room hunt duty below.
+			state.markFollowed()
 			foundationlog.Robotf("CN90_DUNGEON_FOLLOWED cid=%d op=%d\n", s.selfCharacterID, packet.Type)
 		}
 		if packet.Type == protocol.NotiDungeonStartMap {
