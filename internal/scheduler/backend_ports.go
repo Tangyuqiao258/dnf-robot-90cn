@@ -221,6 +221,7 @@ func (d protocolSessionDriver) SendOnline(users []shared.RuntimeOnlineUser) erro
 			EnablePartyFollow:          backendPartyFollowEnabled(d.manager.backendInfo, rc),
 			EnablePartyInvite:          backendPartyInviteEnabled(d.manager.backendInfo, rc),
 			EnableDungeonRevive:        backendDungeonReviveEnabled(d.manager.backendInfo, rc),
+			EnableDungeonFollowCombat:  backendDungeonFollowCombatEnabled(d.manager.backendInfo, rc),
 			EnableChatReply:            backendChatReplyEnabled(d.manager.backendInfo, rc),
 			ChatReplies:                d.manager.loadShoutTemplates().Messages,
 			EnableTrade:                backendTradeEnabled(d.manager.backendInfo, rc),
@@ -279,6 +280,13 @@ func backendPartyInviteEnabled(info shared.BackendInfo, rc robotconfig.RuntimeCo
 
 func backendDungeonReviveEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
 	return rc.AutoDungeonRevive && info.Supports(shared.CapabilityDungeonRevive)
+}
+
+// backendDungeonFollowCombatEnabled reports whether a follower session should
+// report the actors of the rooms the server moves it into. The report rides the
+// follower transport, so a backend that cannot follow cannot clear either.
+func backendDungeonFollowCombatEnabled(info shared.BackendInfo, rc robotconfig.RuntimeConfig) bool {
+	return rc.DungeonFollowCombat && info.Supports(shared.CapabilityDungeonFollow)
 }
 
 // backendChatReplyEnabled reports whether new sessions should answer a directed

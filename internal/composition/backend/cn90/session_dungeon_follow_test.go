@@ -1,12 +1,33 @@
 package cn90
 
 import (
+	"context"
 	"encoding/binary"
+	"net"
 	"testing"
 	"time"
 
 	protocol "robot/internal/protocol/cn90"
 )
+
+// dispatchFollowedStartMap hands one room projection to the packet observer and
+// consumes the op37 acknowledgement it owes as a follower. The write happens on
+// a goroutine because the pipe has no buffer, and the observer writes the ack
+// synchronously before the room's fight duty wakes.
+func dispatchFollowedStartMap(t *testing.T, session *Session, conn net.Conn, body []byte) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		dispatchDungeonStartMap(session, body)
+		close(done)
+	}()
+	wantDungeonFrame(t, conn, protocol.ClassCommand, protocol.CmdFinishLoading, "room load acknowledgement")
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the room projection never returned")
+	}
+}
 
 // shrinkDungeonFollowPacing makes the follower's fight pacing near-instant for
 // one test. The production pacing exists so a follower's kills look like a
@@ -35,7 +56,7 @@ func shrinkDungeonFollowPacing(t *testing.T) {
 func TestSessionDungeonFollowDutyFightsEveryActorIncludingTheBoss(t *testing.T) {
 	shrinkDungeonFollowPacing(t)
 	session, serverConn := newDungeonTestSession(t)
-	dispatchDungeonStartMap(session, dungeonTestStartMapBody(0, 0, 100, []protocol.DungeonStartMapActor{
+	dispatchFollowedStartMap(t, session, serverConn, dungeonTestStartMapBody(0, 0, 100, []protocol.DungeonStartMapActor{
 		dungeonTestMonster(5001),
 		dungeonTestBoss(6001),
 		dungeonTestMonster(5002),
@@ -85,21 +106,48 @@ func TestSessionDungeonFollowDutyReportsEachRoomOnce(t *testing.T) {
 	room := dungeonTestStartMapBody(0, 0, 100, []protocol.DungeonStartMapActor{
 		dungeonTestMonster(5001),
 	})
-	dispatchDungeonStartMap(session, room)
+	dispatchFollowedStartMap(t, session, serverConn, room)
 	body := wantDungeonFrame(t, serverConn, protocol.ClassCommand, protocol.CmdDieMonster, "first room death report")
 	if target := binary.LittleEndian.Uint32(body[0:4]); target != 5001 {
 		t.Fatalf("op39 target = %d want 5001", target)
 	}
-	dispatchDungeonStartMap(session, room)
+	dispatchFollowedStartMap(t, session, serverConn, room)
 	if _, _, _, ok := readTestLegacyFrame(serverConn, 300*time.Millisecond); ok {
 		t.Fatal("a repeated projection reported the same monster dead twice")
 	}
-	dispatchDungeonStartMap(session, dungeonTestStartMapBody(1, 0, 101, []protocol.DungeonStartMapActor{
+	dispatchFollowedStartMap(t, session, serverConn, dungeonTestStartMapBody(1, 0, 101, []protocol.DungeonStartMapActor{
 		dungeonTestMonster(6001),
 	}))
 	body = wantDungeonFrame(t, serverConn, protocol.ClassCommand, protocol.CmdDieMonster, "next room death report")
 	if target := binary.LittleEndian.Uint32(body[0:4]); target != 6001 {
 		t.Fatalf("op39 target = %d want 6001", target)
+	}
+}
+
+// A session opened without the follow-combat switch still has to acknowledge
+// the room projection (op37 opens the server's per-room gate for it) and still
+// records the room, but it reports no deaths: on a run where the human client
+// drives the character, the client's own fight is the only reporter.
+func TestSessionDungeonFollowDutyOffAcknowledgesTheRoomWithoutReportingDeaths(t *testing.T) {
+	shrinkDungeonFollowPacing(t)
+	clientConn, serverConn := net.Pipe()
+	session := &Session{client: protocol.NewClient(clientConn), done: make(chan struct{}), selfCharacterID: 42}
+	ctx, cancel := context.WithCancel(context.Background())
+	session.startDungeonTracking(ctx)
+	t.Cleanup(func() {
+		cancel()
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+	})
+	dispatchFollowedStartMap(t, session, serverConn, dungeonTestStartMapBody(0, 0, 100, []protocol.DungeonStartMapActor{
+		dungeonTestMonster(5001),
+		dungeonTestBoss(6001),
+	}))
+	if active, followed := session.dungeon.followState(); !active || !followed {
+		t.Fatalf("room projection state = (active %v, followed %v) want both set", active, followed)
+	}
+	if _, _, _, ok := readTestLegacyFrame(serverConn, 400*time.Millisecond); ok {
+		t.Fatal("a session with follow combat off reported a room death")
 	}
 }
 

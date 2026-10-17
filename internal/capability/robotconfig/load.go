@@ -158,6 +158,7 @@ func decodeConfig(ini *config.INIConfig) (RuntimeConfig, error) {
 	rc.AutoPartyDungeonDwellSec = dec.Int("auto", "auto_party_dungeon_dwell_sec", rc.AutoPartyDungeonDwellSec)
 	rc.AutoPartyDungeonInviteTimeoutSec = dec.Int("auto", "auto_party_dungeon_invite_timeout_sec", rc.AutoPartyDungeonInviteTimeoutSec)
 	rc.AutoDungeonClear = dec.Bool("auto", "auto_dungeon_clear", rc.AutoDungeonClear)
+	rc.DungeonFollowCombat = dec.Bool("auto", "dungeon_follow_combat", rc.DungeonFollowCombat)
 	rc.AutoChatReply = dec.Bool("auto", "auto_chat_reply", rc.AutoChatReply)
 	rc.AutoTrade = dec.Bool("auto", "auto_trade", rc.AutoTrade)
 	rc.AutoSystemAnnouncement = dec.Bool("auto", "auto_system_announcement", rc.AutoSystemAnnouncement)

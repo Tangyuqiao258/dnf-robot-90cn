@@ -553,6 +553,17 @@ func (s *Session) observeDungeon(packet protocol.Packet) {
 			if view, err := protocol.ParseDungeonStartMap(packet.Body); err == nil {
 				state.markRoom(view)
 			}
+			if active, followed := state.followState(); active && followed {
+				// Every room load is acknowledged with op37, exactly as the
+				// native client does. The server clears its per-room assist
+				// readiness when it commits a move and only this
+				// acknowledgement re-arms it (dnfbridge dungeonAssistRoomLoaded
+				// is the sole writer, never a timer), so a follower that never
+				// acknowledges leaves its member runtime permanently "not
+				// ready" - the exact cause of the party-wide manual route
+				// answering reason=party_not_ready on 2026-10-17.
+				s.ackDungeonRoomLoading()
+			}
 		}
 	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiDungeonSettlementEntry:
 		// The settlement window opening is the gate the op46 play result is
@@ -684,6 +695,25 @@ func (s *Session) finishDungeonLoading(ctx context.Context) error {
 	case <-s.Done():
 		return fmt.Errorf("90CN session ended while the dungeon was loading")
 	}
+}
+
+// ackDungeonRoomLoading answers one room projection with op37. The native
+// client sends this after every scene load, not only the entry, and the server
+// treats it as the per-room readiness signal: dnfbridge clears
+// runtime.assistRoomReady on each committed move and re-arms it only here.
+// Sending from the packet observer keeps the acknowledgement ahead of the
+// room-hunt duty, which is woken by the same projection.
+func (s *Session) ackDungeonRoomLoading() {
+	if s == nil || s.client == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dungeonLoadingTimeout)
+	defer cancel()
+	if err := s.client.FinishLoading(ctx); err != nil {
+		foundationlog.Robotf("CN90_DUNGEON_ROOM_LOAD_FAILED cid=%d err=%v\n", s.selfCharacterID, err)
+		return
+	}
+	foundationlog.Robotf("CN90_DUNGEON_ROOM_LOAD_ACKED cid=%d\n", s.selfCharacterID)
 }
 
 // LeaveDungeon abandons the run the session is inside and waits for the town

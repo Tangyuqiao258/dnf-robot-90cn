@@ -89,6 +89,12 @@ type Session struct {
 	roster *partyRosterState
 	// dungeon tracks the active run and the character's death state.
 	dungeon *dungeonState
+	// dungeonFollowCombat is true when this session was opened to clear the
+	// rooms the server moves it into as a follower. Off, the room projections
+	// are still recorded and the per-room acknowledgement still goes out; only
+	// the death reports stop, because another side of the same run is driving
+	// the character.
+	dungeonFollowCombat bool
 	// townPosition is the last town coordinate the server was told about. A
 	// dungeon entry is refused while the return origin has no position report
 	// behind it in the current town scene, so the entry re-reports this before
@@ -235,7 +241,7 @@ func (f SessionFactory) OpenSession(ctx context.Context, request shared.OpenSess
 	runCtx, cancel := context.WithCancel(context.Background())
 	session := &Session{
 		client: client, cancel: cancel, done: make(chan struct{}), keepaliveDone: make(chan struct{}),
-		selfCharacterID: selfCharacterID, chat: &chatState{},
+		selfCharacterID: selfCharacterID, chat: &chatState{}, dungeonFollowCombat: request.EnableDungeonFollowCombat,
 		chatReplies: request.ChatReplies, chatReplyEnabled: request.EnableChatReply,
 		trade: &tradeState{}, tradeEnabled: request.EnableTrade,
 		tradeOfferStacks: request.TradeOfferStacks, tradeOfferCount: request.TradeOfferCount,

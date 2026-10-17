@@ -17,7 +17,9 @@ import (
 func newDungeonTestSession(t *testing.T) (*Session, net.Conn) {
 	t.Helper()
 	clientConn, serverConn := net.Pipe()
-	session := &Session{client: protocol.NewClient(clientConn), done: make(chan struct{}), selfCharacterID: 42}
+	// Opened the way the fleet opens a session: the follow-combat switch is on,
+	// so the follower duty is installed and the fight tests exercise it.
+	session := &Session{client: protocol.NewClient(clientConn), done: make(chan struct{}), selfCharacterID: 42, dungeonFollowCombat: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	session.startDungeonTracking(ctx)
 	t.Cleanup(func() {
@@ -113,6 +115,57 @@ func TestSessionEnterDungeonWalksTheSelectorThenLoadsTheScene(t *testing.T) {
 	}
 	if dungeonID, difficulty, active := session.DungeonIdentity(); !active || dungeonID != 0x0001abcd || difficulty != 2 {
 		t.Fatalf("dungeon identity = (%d, %d, %v) want (0x0001abcd, 2, true)", dungeonID, difficulty, active)
+	}
+}
+
+func TestSessionFollowerAcknowledgesEveryRoomProjection(t *testing.T) {
+	session, serverConn := newDungeonTestSession(t)
+	// A 19-byte op29 body carries an empty actor table: byte 18 is the count.
+	room := make([]byte, 19)
+	room[0], room[1] = 0, 1
+	room[14], room[15] = 0xaa, 0x01
+	for index := 0; index < 2; index++ {
+		dispatched := make(chan struct{})
+		go func() {
+			session.dispatchPacket(protocol.Packet{
+				Class: protocol.ClassNotice, Type: protocol.NotiDungeonStartMap, Body: room,
+			})
+			close(dispatched)
+		}()
+		cls, typ, body, ok := readTestLegacyFrame(serverConn, 5*time.Second)
+		if !ok {
+			t.Fatalf("room projection %d: no op37 acknowledgement was written", index)
+		}
+		if cls != protocol.ClassCommand || typ != protocol.CmdFinishLoading {
+			t.Fatalf("room projection %d: frame = class %d op %d want class %d op %d",
+				index, cls, typ, protocol.ClassCommand, protocol.CmdFinishLoading)
+		}
+		if want := protocol.FinishLoadingBody(); !bytes.Equal(body, want) {
+			t.Fatalf("room projection %d: op37 body = % X want % X", index, body, want)
+		}
+		select {
+		case <-dispatched:
+		case <-time.After(5 * time.Second):
+			t.Fatal("packet dispatch did not finish")
+		}
+	}
+	// The first projection is what tells this session the server pulled it
+	// into a run it never opened; only a follower owes the per-room ack.
+	if active, followed := session.dungeon.followState(); !active || !followed {
+		t.Fatalf("run state = (active %v, followed %v) want (true, true)", active, followed)
+	}
+}
+
+func TestSessionLeaderDoesNotAcknowledgeRoomProjectionsItSelfOpened(t *testing.T) {
+	session, serverConn := newDungeonTestSession(t)
+	session.dungeon.markActive(5, 0)
+	room := make([]byte, 19)
+	room[14], room[15] = 0xaa, 0x01
+	session.dispatchPacket(protocol.Packet{
+		Class: protocol.ClassNotice, Type: protocol.NotiDungeonStartMap, Body: room,
+	})
+	if _, typ, _, ok := readTestLegacyFrame(serverConn, 200*time.Millisecond); ok {
+		t.Fatalf("the leader wrote op%d for a room it opened itself", typ)
 	}
 }
 

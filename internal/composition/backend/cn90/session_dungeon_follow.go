@@ -89,9 +89,16 @@ type dungeonFollowRun struct {
 // startDungeonFollowDuty installs the queue and the worker that hunts the room
 // a follower was moved into. Like the settlement worker it is installed for
 // every tracked session and costs nothing until the server announces a run this
-// session did not open.
+// session did not open. A session opened without the follow-combat switch gets
+// no queue at all: its room projections are still recorded and its per-room
+// acknowledgement still goes out, but the deaths are left to whoever drives
+// the character (the human client on a natively placed actor), so the two
+// sides never race to report the same room.
 func (s *Session) startDungeonFollowDuty(ctx context.Context) {
 	if s == nil || s.client == nil || ctx == nil {
+		return
+	}
+	if !s.dungeonFollowCombat {
 		return
 	}
 	if s.dungeon == nil {

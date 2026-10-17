@@ -61,7 +61,12 @@ func Default() RuntimeConfig {
 		// Clearing the run is opt-in on top of the party entry: entry alone only
 		// walks the members into the first room, and the room-by-room walk needs
 		// the server's maze topology to cooperate.
-		AutoDungeonClear:                false,
+		AutoDungeonClear: false,
+		// The follower's room report defaults on: it is how a follower-driven
+		// run clears its rooms at all, and every previous fleet ran with it.
+		// Sessions that ride a human-driven run turn it off together with the
+		// switch that places their actors natively.
+		DungeonFollowCombat:             true,
 		AutoServerNotice:                false,
 		ServerNoticeRobotIntervalMinSec: 900,
 		ServerNoticeRobotIntervalMaxSec: 3600,

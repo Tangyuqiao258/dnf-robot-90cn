@@ -1,6 +1,7 @@
 package cn90
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -9,9 +10,12 @@ import (
 
 // dungeonTestRun activates the session's run the way a follower learns about
 // it: the server pushes the run projections after the character is inside.
-func dungeonTestRun(session *Session) {
+// The room projection draws the follower's op37 ack, which is consumed here so
+// the test's next frame is the one the chain under test writes.
+func dungeonTestRun(t *testing.T, session *Session, conn net.Conn) {
+	t.Helper()
 	session.dispatchPacket(protocol.Packet{Class: protocol.ClassNotice, Type: protocol.NotiDungeonInfo})
-	session.dispatchPacket(protocol.Packet{Class: protocol.ClassNotice, Type: protocol.NotiDungeonStartMap, Body: []byte{0, 1, 0, 0}})
+	dispatchFollowedStartMap(t, session, conn, []byte{0, 1, 0, 0})
 }
 
 func dungeonTestSettlementEntry(session *Session) {
@@ -29,7 +33,7 @@ func dungeonTestClearReward(session *Session) {
 // once the card layout arrives.
 func TestSessionSettlementChainAnswersEveryGate(t *testing.T) {
 	session, serverConn := newDungeonTestSession(t)
-	dungeonTestRun(session)
+	dungeonTestRun(t, session, serverConn)
 	dungeonTestSettlementEntry(session)
 
 	cls, typ, body, ok := readTestLegacyFrame(serverConn, 5*time.Second)
@@ -95,7 +99,7 @@ func TestSessionSettlementChainAnswersEveryGate(t *testing.T) {
 // marker it sets is what the worker reads.
 func TestSessionSettlementChainSkipsThePlayResultItAlreadySent(t *testing.T) {
 	session, serverConn := newDungeonTestSession(t)
-	dungeonTestRun(session)
+	dungeonTestRun(t, session, serverConn)
 	session.dungeon.markPlayResultSent(time.Now())
 	dungeonTestSettlementEntry(session)
 
@@ -119,7 +123,7 @@ func TestSessionSettlementChainSkipsThePlayResultItAlreadySent(t *testing.T) {
 // chain again instead of treating the first run's answers as the new run's.
 func TestSessionSettlementChainResetsWithTheRun(t *testing.T) {
 	session, serverConn := newDungeonTestSession(t)
-	dungeonTestRun(session)
+	dungeonTestRun(t, session, serverConn)
 	dungeonTestSettlementEntry(session)
 	if _, typ, _, ok := readTestLegacyFrame(serverConn, 5*time.Second); !ok || typ != protocol.CmdSetPlayResult {
 		t.Fatalf("first run did not start the chain: op=%d ok=%t", typ, ok)
@@ -133,7 +137,7 @@ func TestSessionSettlementChainResetsWithTheRun(t *testing.T) {
 		t.Fatalf("the play result marker survived the run: %+v", handshake)
 	}
 
-	dungeonTestRun(session)
+	dungeonTestRun(t, session, serverConn)
 	dungeonTestSettlementEntry(session)
 	if _, typ, _, ok := readTestLegacyFrame(serverConn, 5*time.Second); !ok || typ != protocol.CmdSetPlayResult {
 		t.Fatalf("second run did not restart the chain: op=%d ok=%t", typ, ok)

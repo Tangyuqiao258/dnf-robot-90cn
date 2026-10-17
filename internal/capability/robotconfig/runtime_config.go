@@ -210,7 +210,16 @@ type RuntimeConfig struct {
 	// standing in the entry room until the dwell timer leaves. It is opt-in
 	// separately from entry because it moves characters through the server's
 	// own maze topology, which is a property of each server's PVF.
-	AutoDungeonClear                bool `json:"auto_dungeon_clear"`
+	AutoDungeonClear bool `json:"auto_dungeon_clear"`
+	// DungeonFollowCombat controls whether a party follower clears the room it
+	// was moved into by reporting its actors dead (op39). It stays on by default
+	// because that report is the only thing that lets a follower-driven run
+	// progress. It goes off when the room is cleared by someone else on the
+	// same run - a human client driving the follower's actor through the
+	// server's native party placement - so the two sides do not race to report
+	// the same deaths. The per-room loading acknowledgement (op37) is separate
+	// and stays on either way.
+	DungeonFollowCombat             bool `json:"dungeon_follow_combat"`
 	AutoChatReply                   bool `json:"auto_chat_reply"`
 	AutoTrade                       bool `json:"auto_trade"`
 	AutoSystemAnnouncement          bool `json:"auto_system_announcement"`

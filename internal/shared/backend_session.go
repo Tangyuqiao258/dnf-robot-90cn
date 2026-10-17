@@ -27,6 +27,11 @@ type OpenSessionRequest struct {
 	// learn which invitations were answered. Backends without a party transport
 	// leave it unimplemented.
 	EnablePartyInvite bool
+	// EnableDungeonFollowCombat makes a pulled-in follower clear the rooms the
+	// server moved it into by reporting their actors dead. Backends without a
+	// dungeon combat transport leave it unimplemented. Turning it off keeps the
+	// follower's per-room loading acknowledgement; only the death reports stop.
+	EnableDungeonFollowCombat bool
 	// EnableDungeonRevive makes the session answer the server's death notice
 	// with a revive request, so a character that died inside a run is not
 	// returned to town by the server's ten second timer. Backends without a
