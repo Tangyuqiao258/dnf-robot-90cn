@@ -32,6 +32,7 @@ type Actor struct {
 	nextDungeonEnter  time.Time
 	nextPartyDungeon  time.Time
 	nextPartyExit     time.Time
+	nextPartyFollow   time.Time
 	nextServerNotice  time.Time
 	storeUntil        time.Time
 	lastOnlineTry     time.Time
@@ -40,6 +41,7 @@ type Actor struct {
 	failures          int
 	failureClass      string
 	onlineEstablished bool
+	partyFollowLogged bool
 	busy              bool
 	busyKind          string
 	releaseRequested  bool

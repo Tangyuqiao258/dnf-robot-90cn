@@ -16,6 +16,15 @@ const (
 	// other automatic action is paced at.
 	partyExitIntervalMinSec = 15
 	partyExitIntervalMaxSec = 30
+	// partyFollowIntervalMinSec/MaxSec pace the follow duty of a party member.
+	// A party owns its member's movement and the solo move round sits below the
+	// party guard, so this round is the only thing that walks a follower toward
+	// its leader. Its cadence is the gap between the end of one walk and the
+	// start of the next, not the length of a walk: the move round itself sends
+	// several steps over a few seconds, and a leader paced like a solo wanderer
+	// (6-18s) is out of sight before the follower takes its second step.
+	partyFollowIntervalMinSec = 3
+	partyFollowIntervalMaxSec = 6
 )
 
 func (a *Actor) logoutCurrentUID() robotcap.ActionResult {
@@ -197,11 +206,38 @@ func (a *Actor) tick(now time.Time) {
 			foundationlog.Robotf("[Actor] party_exit_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
 		}
 	}
-	if st.PartyActive || a.runtime.PartyActive(uid) {
+	inParty := st.PartyActive || a.runtime.PartyActive(uid)
+	isStore := st.RobotType == 2 || st.RobotType == 3
+	// The follow duty is the other round above the party guard, for the same
+	// reason the exit duty sits there: the guard returns before the solo move
+	// round, so a party member had no round left that could walk it toward its
+	// leader, and a human-led party that the server had formed stood frozen
+	// next to the leader it was tracking. AutoMove is already party-aware and
+	// refuses to roam on its own inside a party, so a member with no leader
+	// position simply stands still; its own timer, not the solo schedule, paces
+	// the round (see clearAutoActionSchedule). A stall is left out for the same
+	// reason the solo move round is: the stall point is where the shop stands.
+	if inParty && !isStore && a.modeValue() == ModeAuto && a.runtime.AutoActionsEnabled(rc) && a.nextPartyFollowDue(now, rc) {
+		var res robotcap.ActionResult
+		a.runBusy("party_follow", func() {
+			res = a.runtime.AutoMove(uid)
+		})
+		if res.OK {
+			// One line per party entry: the round runs every few seconds for as
+			// long as the party stands, and a fleet party's followers would
+			// otherwise double the fleet's log rate while it forms.
+			if a.markPartyFollowLogged() {
+				foundationlog.Robotf("[Actor] party_follow slot=%d uid=%d\n", a.slotIDValue(), uid)
+			}
+		} else if res.State == robotcap.ActionStateFailed {
+			foundationlog.Robotf("[Actor] party_follow_failed slot=%d uid=%d message=%s\n", a.slotIDValue(), uid, res.Message)
+		}
+	}
+	if inParty {
 		a.clearAutoActionSchedule()
 		return
 	}
-	isStore := st.RobotType == 2 || st.RobotType == 3
+	a.resetPartyFollowLogged()
 	if isStore && a.storeUntilMissing() {
 		grace := time.Duration(rc.AutoStoreTickSec) * time.Second
 		if grace <= 0 {
@@ -351,12 +387,15 @@ func (a *Actor) clearAutoSchedule() {
 }
 
 // clearAutoActionSchedule silences the rounds a party silences. nextPartyExit
-// is deliberately not one of them: the exit duty runs above the party guard, so
-// zeroing its timer here would hand it a fresh 15-30s on every tick the guard
-// returns on -- and the guard returns on every tick a party stands in a run --
-// which leaves the duty never due and the party never out. It keeps its own
-// cadence for as long as the robot lives; clearAutoSchedule, the full session
-// reset, is what puts it back.
+// and nextPartyFollow are deliberately not among them: both duties run above
+// the party guard, so zeroing their timers here would hand them a fresh
+// interval on every tick the guard returns on -- and the guard returns on every
+// tick a party stands -- which leaves each duty never due. nextPartyExit would
+// never take the party out of a run, and nextPartyFollow would never walk a
+// member that is tracking a human leader, which is exactly what a human-led
+// party looked like before 2026-10-17. Both keep their own cadence for as long
+// as the robot lives; clearAutoSchedule, the full session reset, is what puts
+// them back.
 func (a *Actor) clearAutoActionSchedule() {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
@@ -381,8 +420,29 @@ func (a *Actor) clearAutoScheduleLocked() {
 	a.nextDungeonEnter = time.Time{}
 	a.nextPartyDungeon = time.Time{}
 	a.nextPartyExit = time.Time{}
+	a.nextPartyFollow = time.Time{}
 	a.nextServerNotice = time.Time{}
 	a.storeUntil = time.Time{}
+	a.partyFollowLogged = false
+}
+
+// markPartyFollowLogged reports whether this is the first successful follow
+// since the last reset, so the round logs once per party entry instead of once
+// per step.
+func (a *Actor) markPartyFollowLogged() bool {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	if a.partyFollowLogged {
+		return false
+	}
+	a.partyFollowLogged = true
+	return true
+}
+
+func (a *Actor) resetPartyFollowLogged() {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	a.partyFollowLogged = false
 }
 
 func (a *Actor) storeExpired(now time.Time) bool {
@@ -513,6 +573,19 @@ func (a *Actor) nextPartyExitDue(now time.Time, rc robotconfig.RuntimeConfig) bo
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	return a.randomizedDue(&a.nextPartyExit, now, partyExitIntervalMinSec, partyExitIntervalMaxSec)
+}
+
+// nextPartyFollowDue paces the follow duty. auto_party_follow is the same
+// switch that decides whether the session tracks the leader at all: with it off
+// there is no target to walk to, and the round must not spend a tick per
+// interval finding that out.
+func (a *Actor) nextPartyFollowDue(now time.Time, rc robotconfig.RuntimeConfig) bool {
+	if !rc.AutoPartyFollow {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.randomizedDue(&a.nextPartyFollow, now, partyFollowIntervalMinSec, partyFollowIntervalMaxSec)
 }
 
 // nextServerNoticeDue is the per-robot timer. The fleet-wide gap and hourly

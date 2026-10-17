@@ -164,6 +164,18 @@ func (r *RobotRuntime) AutoMove(uid int) robotcap.ActionResult {
 		if !ok || st.StateName != robotcap.RuntimeStateRunning || st.DisconnectReason != 0 {
 			return robotcap.ActionResult{UID: uid, OK: false, State: robotcap.ActionStateOffline}
 		}
+		if runs, ok := r.manager.actions.(interface {
+			DungeonState(int) (bool, bool, time.Time)
+		}); ok {
+			// A character inside a run has no town move to make: the run owns it
+			// until the exit duty takes it back. Party members follow their leader
+			// through this same round, and a fleet party stands in a run for as
+			// long as its dwell, so without this guard every follower would spend
+			// that whole time asking the server for town moves from a dungeon.
+			if active, _, _ := runs.DungeonState(uid); active {
+				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "in_dungeon"}
+			}
+		}
 		rc := r.Config()
 		maps := r.manager.loadMapCatalog()
 		target, hasTarget := r.manager.currentFollowTarget(uid, rc, maps)

@@ -202,3 +202,56 @@ func TestPartyActiveActorStillRunsThePartyExitDuty(t *testing.T) {
 		t.Fatalf("party actor ran solo rounds: moves=%d shouts=%d stores=%d expires=%d", runtime.moves, runtime.shouts, runtime.stores, runtime.expires)
 	}
 }
+
+// TestPartyActiveActorStillRunsThePartyFollowDuty is the regression for the
+// 2026-10-17 report that a human's invited dummies never walked with him: the
+// party guard returned before the solo move round, so nothing but the exit duty
+// ever ran for a party member. The follower session tracked the leader's live
+// position the whole time (CN90_PARTY_FOLLOW_POSITION) and no round ever walked
+// to it, which is why he could not lead them into a dungeon.
+//
+// It ticks twice for the same reason the exit-duty test does: the guard clears
+// the solo schedule on every tick it returns on, so a follow timer that lived in
+// that schedule would be re-armed to a fresh interval every tick and never come
+// due. The second tick is what tells the two apart.
+func TestPartyActiveActorStillRunsThePartyFollowDuty(t *testing.T) {
+	runtime := &partyWaitRuntime{
+		config: robotconfig.RuntimeConfig{
+			AutoActions:                 true,
+			AutoPartyFollow:             true,
+			AutoMoveIntervalMinSec:      1,
+			AutoMoveIntervalMaxSec:      1,
+			AutoShoutIntervalMinSec:     1,
+			AutoShoutIntervalMaxSec:     1,
+			AutoStoreIntervalMinSec:     1,
+			AutoStoreIntervalMaxSec:     1,
+			AutoStoreProbabilityPercent: 100,
+		},
+		status: robotcap.RuntimeStatus{UID: 7, StateName: robotcap.RuntimeStateRunning},
+		party:  true,
+	}
+	a := NewActor(1, ModeAuto, runtime)
+	a.resetForUID(7)
+	now := time.Now()
+	a.nextMove = now.Add(-time.Second)
+	a.nextShout = now.Add(-time.Second)
+	a.nextStore = now.Add(-time.Second)
+
+	a.tick(now)
+	if runtime.moves != 0 {
+		t.Fatalf("follow ran before it was due: moves=%d", runtime.moves)
+	}
+	if a.nextPartyFollow.IsZero() {
+		t.Fatal("follow duty armed no timer")
+	}
+	a.tick(now.Add((partyFollowIntervalMaxSec + 1) * time.Second))
+	if runtime.moves != 1 {
+		t.Fatalf("party actor skipped the follow duty: moves=%d", runtime.moves)
+	}
+	if runtime.shouts != 0 || runtime.stores != 0 || runtime.expires != 0 {
+		t.Fatalf("party actor ran solo rounds: shouts=%d stores=%d expires=%d", runtime.shouts, runtime.stores, runtime.expires)
+	}
+	if a.nextPartyFollow.IsZero() {
+		t.Fatal("the party guard cleared the follow pacing")
+	}
+}

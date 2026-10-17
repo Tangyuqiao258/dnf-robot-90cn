@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	robotcap "robot/internal/capability/robot"
 	robotconfig "robot/internal/capability/robotconfig"
 	"robot/internal/shared"
 )
@@ -135,5 +136,113 @@ func TestBackendConfigPolicyClearsPartyFollowWithoutTheCapability(t *testing.T) 
 	m.applyBackendConfigPolicy(&rc)
 	if rc.AutoPartyFollow || rc.AutoPartyAccept {
 		t.Fatalf("policy left party switches on: follow=%t accept=%t", rc.AutoPartyFollow, rc.AutoPartyAccept)
+	}
+}
+
+// followMoveTransport is a party-run transport that also publishes one leader
+// position and records every town move the move service dispatches, so the
+// follow round can be driven end to end without a live server.
+type followMoveTransport struct {
+	*partyRunTransport
+	target    shared.PartyFollowTarget
+	hasTarget bool
+	moves     []shared.RuntimeMoveCommand
+}
+
+func (t *followMoveTransport) PartyFollowTarget(int) (shared.PartyFollowTarget, bool) {
+	return t.target, t.hasTarget
+}
+
+func (t *followMoveTransport) MoveTown(_ context.Context, cmd shared.RuntimeMoveCommand) error {
+	t.moves = append(t.moves, cmd)
+	return nil
+}
+
+// followMoveManager builds a runtime whose only robot stands in a live party on
+// a map with movement geometry, so AutoMove takes the follow branch instead of
+// the login-room escape.
+func followMoveManager(t *testing.T, transport *followMoveTransport) *RobotRuntime {
+	t.Helper()
+	if transport.status == nil {
+		transport.status = map[int]robotcap.RuntimeStatus{
+			7: {UID: 7, CID: 700, StateName: robotcap.RuntimeStateRunning, Village: 3, Area: 12, PartyActive: true},
+		}
+	}
+	manager := testRobotManagerWithConfig(t, "[move]\nmove_steps = 2\nmove_step_delay_ms = 0\n")
+	manager.SetBackendActionTransport(transport)
+	manager.SetTownMapCatalog([]shared.MapCatalogItem{{
+		Village: 3, Area: 12, Use: true,
+		Rectangles: []shared.MapRectangle{{XMin: 600, XMax: 800, YMin: 200, YMax: 300}},
+	}})
+	manager.runtimeState.snapshot = transport.status
+	manager.runtimeState.updatedAt = time.Now()
+	return NewRobotRuntime(manager)
+}
+
+// TestAutoMoveWalksAPartyMemberToItsLeader is the regression for the
+// 2026-10-17 report that a human's invited dummies never walked with him. The
+// actor's follow duty calls AutoMove for a party member, and this is what
+// AutoMove must do when the session has a leader position: walk to a point
+// inside the follow radius around that leader. Before the follow duty existed,
+// the party guard silenced this move round entirely, so the tracked leader
+// position was never walked to.
+func TestAutoMoveWalksAPartyMemberToItsLeader(t *testing.T) {
+	transport := &followMoveTransport{
+		partyRunTransport: &partyRunTransport{},
+		target:            shared.PartyFollowTarget{CharacterID: 800, Village: 3, Area: 12, X: 700, Y: 220, ObservedAt: time.Now()},
+		hasTarget:         true,
+	}
+	runtime := followMoveManager(t, transport)
+
+	result := runtime.AutoMove(7)
+	if !result.OK || result.State != robotcap.ActionStateMoved {
+		t.Fatalf("party follow move = %s/%s", result.State, result.Message)
+	}
+	if len(transport.moves) == 0 {
+		t.Fatal("party follow dispatched no town move")
+	}
+	last := transport.moves[len(transport.moves)-1]
+	if last.Village != 3 || last.Area != 12 {
+		t.Fatalf("move destination = %d/%d want the leader's map 3/12", last.Village, last.Area)
+	}
+	if last.X < 580 || last.X > 820 || last.Y < 190 || last.Y > 250 {
+		t.Fatalf("move destination = %d,%d outside the follow radius around 700,220", last.X, last.Y)
+	}
+}
+
+// A party member with no leader position must stand still rather than fall
+// through to the solo wander: the party owns its member's movement, and a
+// follower that wanders on its own is not following anybody.
+func TestAutoMoveLeavesAPartyMemberWithoutALeaderStandingStill(t *testing.T) {
+	transport := &followMoveTransport{partyRunTransport: &partyRunTransport{}}
+	runtime := followMoveManager(t, transport)
+
+	result := runtime.AutoMove(7)
+	if result.OK || result.State != robotcap.ActionStateOffline {
+		t.Fatalf("party member without a leader = %s/%s", result.State, result.Message)
+	}
+	if len(transport.moves) != 0 {
+		t.Fatalf("party member without a leader moved: %v", transport.moves)
+	}
+}
+
+// A character inside a run has no town move to make. The follow duty now calls
+// AutoMove for every party member every few seconds, and a party run holds its
+// members for the whole dwell, so without this guard every follower would spend
+// the run asking the server for town moves from a dungeon.
+func TestAutoMoveRefusesInsideADungeonRun(t *testing.T) {
+	transport := &followMoveTransport{
+		partyRunTransport: &partyRunTransport{runActive: true},
+		target:            shared.PartyFollowTarget{CharacterID: 800, Village: 3, Area: 12, X: 700, Y: 220, ObservedAt: time.Now()},
+		hasTarget:         true,
+	}
+	runtime := followMoveManager(t, transport)
+
+	result := runtime.AutoMove(7)
+	if result.State != robotcap.ActionStateCancelled || result.Message != "in_dungeon" {
+		t.Fatalf("move inside a run = %s/%s want a cancelled in_dungeon", result.State, result.Message)
+	}
+	if len(transport.moves) != 0 {
+		t.Fatalf("move inside a run dispatched %d town moves", len(transport.moves))
 	}
 }
