@@ -254,7 +254,7 @@ func TestCommandEntryStaysBackendNeutralOutsideAssembly(t *testing.T) {
 	}
 }
 
-func TestReadmeFilesDoNotFragmentDocumentation(t *testing.T) {
+func TestReadmeFilesStayAtRepositoryRoot(t *testing.T) {
 	root := repoRoot(t)
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -268,7 +268,10 @@ func TestReadmeFilesDoNotFragmentDocumentation(t *testing.T) {
 			return nil
 		}
 		if strings.EqualFold(filepath.Base(path), "README.md") {
-			t.Errorf("%s fragments documentation; use doc/规整文档.md", path)
+			if strings.EqualFold(filepath.Dir(path), root) {
+				return nil
+			}
+			t.Errorf("%s fragments documentation; keep the single README.md at the repository root and use doc/规整文档.md for everything else", path)
 		}
 		return nil
 	})
