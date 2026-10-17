@@ -30,6 +30,7 @@ type partyRunTransport struct {
 	runActive      bool
 	runSelfStarted bool
 	runSince       time.Time
+	runSettled     bool
 	enterErr       error
 	clearErr       error
 
@@ -77,6 +78,10 @@ func (t *partyRunTransport) LeaveParty(uid int) error {
 
 func (t *partyRunTransport) DungeonState(int) (bool, bool, time.Time) {
 	return t.runActive, t.runSelfStarted, t.runSince
+}
+
+func (t *partyRunTransport) DungeonSettled(int) bool {
+	return t.runSettled
 }
 
 func (t *partyRunTransport) EnterDungeon(_ int, dungeonID uint32, _ byte) error {
@@ -400,6 +405,70 @@ func TestAutoPartyDungeonExitStaysInARunAStrangerIsIn(t *testing.T) {
 	}
 	if len(transport.leftParties) != 0 {
 		t.Fatalf("a party holding a stranger was left: %v", transport.leftParties)
+	}
+}
+
+// TestAutoPartyDungeonExitFollowsAPlayerOutOfTheParty covers the live flow the
+// duty was extended for: robots run a party under a human player, the player
+// leaves the party, and the robots must leave with them - out of the run and
+// out of the party - instead of waiting out the dwell as if the run were still
+// somebody else's. A run that started seconds ago is inside the dwell, so only
+// the roster comparison can let the exit through.
+func TestAutoPartyDungeonExitFollowsAPlayerOutOfTheParty(t *testing.T) {
+	transport := &partyRunTransport{
+		runActive: true,
+		runSince:  time.Now().Add(-10 * time.Second),
+		roster:    []int{700, 800, 5000},
+		partySince: time.Now().Add(-10 * time.Second),
+	}
+	runtime := partyRunManager(t, transport)
+
+	// First tick sees the player in the roster and records them as foreign.
+	result := runtime.AutoPartyDungeonExit(7)
+	if result.State != robotcap.ActionStateCancelled || result.Message != "dungeon_hold" {
+		t.Fatalf("first tick = %s/%s want a cancelled dungeon_hold", result.State, result.Message)
+	}
+	// The player walks out; the server now reports only the fleet's robots.
+	transport.roster = []int{700, 800}
+	result = runtime.AutoPartyDungeonExit(7)
+	if !result.OK {
+		t.Fatalf("exit refused: state=%s message=%s", result.State, result.Message)
+	}
+	if len(transport.leftRuns) != 1 {
+		t.Fatalf("run leaves = %v want the run left with the player", transport.leftRuns)
+	}
+	if len(transport.leftParties) != 1 {
+		t.Fatalf("party leaves = %v want the now-fleet party ended", transport.leftParties)
+	}
+}
+
+// TestAutoPartyDungeonExitLeavesASettledRunButKeepsTheParty is the return-to-town
+// half: once the run is settled every member owes only its own exit, so a robot
+// leaves the cleared run even while a player is still in the party - and it
+// leaves the party alone, because the human is still in it and the robots are
+// meant to come back to town as that party. The dwell must not hold a settled
+// run either.
+func TestAutoPartyDungeonExitLeavesASettledRunButKeepsTheParty(t *testing.T) {
+	transport := &partyRunTransport{
+		runActive:  true,
+		runSettled: true,
+		runSince:   time.Now().Add(-10 * time.Second),
+		roster:     []int{700, 5000},
+		partySince: time.Now().Add(-10 * time.Second),
+	}
+	runtime := partyRunManager(t, transport)
+
+	result := runtime.AutoPartyDungeonExit(7)
+	// The run exit was sent; the party half is declined because the human is
+	// still in it, and that refusal is what keeps the party intact.
+	if result.State != robotcap.ActionStateCancelled || result.Message != "party_foreign" {
+		t.Fatalf("result = %s/%s want a cancelled party_foreign after the run exit", result.State, result.Message)
+	}
+	if len(transport.leftRuns) != 1 {
+		t.Fatalf("run leaves = %v want the settled run left", transport.leftRuns)
+	}
+	if len(transport.leftParties) != 0 {
+		t.Fatalf("party leaves = %v want the party kept with the human", transport.leftParties)
 	}
 }
 

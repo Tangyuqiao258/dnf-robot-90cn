@@ -21,6 +21,13 @@ import (
 type RobotRuntime struct {
 	manager  *RobotManager
 	uidLocks *lockhub.RefHub
+	// partyMu guards partyForeign: the character ids of each robot's current
+	// party that the fleet does not run (a human player, typically). The exit
+	// duty uses it to tell "the stranger left this party" apart from "a fleet
+	// member is briefly offline": only the former removes the id from the
+	// roster the server reports.
+	partyMu      lockhub.RWLocker
+	partyForeign map[int]map[int]bool
 }
 
 var _ actormodel.RobotRuntime = (*RobotRuntime)(nil)
@@ -662,6 +669,7 @@ type partyTransport interface {
 	PartySince(int) (time.Time, bool)
 	LeaveParty(int) error
 	DungeonState(int) (bool, bool, time.Time)
+	DungeonSettled(int) bool
 	EnterDungeon(int, uint32, byte) error
 	LeaveDungeon(int) error
 	ClearDungeon(int) error
@@ -854,11 +862,18 @@ func (r *RobotRuntime) partyCandidates(uid, selfCharacterID, village, area, limi
 // somebody: the fleet forms parties of its own, so it has to be able to end
 // them, or the members stand frozen in town for as long as the party exists.
 //
-// The party is only ever ended, and its run only ever left, when every member is
-// one of this fleet's online robots. A party holding a character the fleet does
-// not run is somebody else's, and the robots in it were asked to be there: the
-// run is that character's too, so a robot that walked out of it would leave them
-// standing inside alone.
+// The party is only ever ended, and an active run only ever left, when every
+// member is one of this fleet's online robots. A party holding a character the
+// fleet does not run is somebody else's, and the robots in it were asked to be
+// there: the run is that character's too, so a robot that walked out of it would
+// leave them standing inside alone. Two states override that:
+//
+//   - the run is settled. A cleared run belongs to nobody, every member owes only
+//     its own exit, and the human player beside the robots is already back in
+//     town; the robots leave the run and return to town with the party intact.
+//   - the stranger left the party. The roster no longer holds the player who
+//     invited the robots, so the party - and the run it dragged them into - is
+//     the fleet's to end, immediately rather than after the dwell.
 func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 	return r.run(uid, func() robotcap.ActionResult {
 		st, ok := r.Status(uid)
@@ -876,13 +891,22 @@ func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 		// The party decides both halves of the duty, so it is read before either
 		// of them is touched.
 		members, known := party.PartyMembers(uid)
+		// strangerLeft is the tick a player who had joined this party walked out of
+		// it: the fleet robots now own the party and the run, and must end both
+		// immediately instead of waiting out the dwell or the formation grace.
+		strangerLeft := r.notePartyForeign(uid, members, known)
+		fleetOwned := known && r.partyIsFleet(members)
+		// A settled run is a cleared run. It belongs to nobody any more: every
+		// member owes only its own exit, and a robot that leaves it is not
+		// abandoning a party still fighting inside.
+		settled := party.DungeonSettled(uid)
 		leftRun := false
 		if active, selfStarted, since := party.DungeonState(uid); active {
 			// The hold is measured from the run, not from this tick, so a robot the
 			// server dragged in is not thrown out again a second later just because
 			// its own timer happened to be due.
 			hold := time.Duration(rc.AutoPartyDungeonDwellSec) * time.Second
-			if hold > 0 && !since.IsZero() && time.Since(since) < hold {
+			if hold > 0 && !since.IsZero() && time.Since(since) < hold && !settled && !strangerLeft {
 				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "dungeon_hold"}
 			}
 			// A known empty roster is the disband the other members leave behind:
@@ -891,7 +915,7 @@ func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 			// member leaves its own run rather than being held as a stranger's
 			// guest forever.
 			disbanded := known && len(members) == 0
-			if !disbanded && (!known || !r.partyIsFleet(members)) {
+			if !disbanded && !fleetOwned && !settled {
 				// The run belongs to a party the fleet does not own, so it is not the
 				// fleet's to leave. The robot was asked into it and stays for as long as
 				// that party keeps it.
@@ -909,7 +933,7 @@ func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 			}
 			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "no_party"}
 		}
-		if !leftRun {
+		if !leftRun && !strangerLeft {
 			// Nothing has happened yet. This is either a formation in progress or a
 			// party that never got anywhere, and only its age tells them apart.
 			since, ok := party.PartySince(uid)
@@ -943,6 +967,17 @@ func (r *RobotRuntime) partyIsFleet(members []int) bool {
 	if len(members) == 0 {
 		return false
 	}
+	online := r.fleetOnlineCIDs()
+	for _, member := range members {
+		if !online[member] {
+			return false
+		}
+	}
+	return true
+}
+
+// fleetOnlineCIDs returns the character ids of this fleet's online robots.
+func (r *RobotRuntime) fleetOnlineCIDs() map[int]bool {
 	status := r.manager.runtimeStatusMapCopy()
 	online := make(map[int]bool, len(status))
 	for _, st := range status {
@@ -950,12 +985,56 @@ func (r *RobotRuntime) partyIsFleet(members []int) bool {
 			online[st.CID] = true
 		}
 	}
+	return online
+}
+
+// notePartyForeign records which members of this robot's current party are not
+// fleet robots and reports the tick on which one of them disappeared from the
+// roster. A human who invited robots and then left the party is what this
+// detects: the roster still holds the fleet robots, so the robots know the
+// party is now theirs to end (and the run the human dragged them into is
+// theirs to leave) instead of waiting out the dwell or the formation grace.
+//
+// The comparison is roster-to-roster on purpose: a fleet member that is briefly
+// offline stays listed in the roster the server reports, so it reads as foreign
+// for a tick but never disappears, and it must not be mistaken for a player
+// walking out.
+func (r *RobotRuntime) notePartyForeign(uid int, members []int, known bool) bool {
+	r.partyMu.Lock()
+	defer r.partyMu.Unlock()
+	if r.partyForeign == nil {
+		r.partyForeign = make(map[int]map[int]bool)
+	}
+	if !known || len(members) == 0 {
+		delete(r.partyForeign, uid)
+		return false
+	}
+	current := make(map[int]bool, len(members))
 	for _, member := range members {
-		if !online[member] {
-			return false
+		current[member] = true
+	}
+	strangerLeft := false
+	for member := range r.partyForeign[uid] {
+		if !current[member] {
+			strangerLeft = true
 		}
 	}
-	return true
+	online := r.fleetOnlineCIDs()
+	foreign := make(map[int]bool)
+	for _, member := range members {
+		if !online[member] {
+			foreign[member] = true
+		}
+	}
+	if len(foreign) == 0 {
+		delete(r.partyForeign, uid)
+	} else {
+		r.partyForeign[uid] = foreign
+		// Still holding a stranger: the party stays theirs even if another one
+		// left on this tick.
+		strangerLeft = false
+	}
+	return strangerLeft
 }
 
 // AutoServerNotice runs one fleet-paced server-notice action: it prepares the

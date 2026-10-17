@@ -8,11 +8,32 @@ import (
 	protocol "robot/internal/protocol/cn90"
 )
 
+// shrinkDungeonFollowPacing makes the follower's fight pacing near-instant for
+// one test. The production pacing exists so a follower's kills look like a
+// player's; a test that waited it out would spend a minute in one room.
+func shrinkDungeonFollowPacing(t *testing.T) {
+	t.Helper()
+	room := dungeonFollowRoomTimeout
+	engageMin, engageMax := dungeonFollowEngageDelayMin, dungeonFollowEngageDelayMax
+	killMin, killMax := dungeonFollowKillDelayMin, dungeonFollowKillDelayMax
+	bossMin, bossMax := dungeonFollowBossFightMin, dungeonFollowBossFightMax
+	dungeonFollowEngageDelayMin, dungeonFollowEngageDelayMax = 5*time.Millisecond, 10*time.Millisecond
+	dungeonFollowKillDelayMin, dungeonFollowKillDelayMax = 5*time.Millisecond, 10*time.Millisecond
+	dungeonFollowBossFightMin, dungeonFollowBossFightMax = 5*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() {
+		dungeonFollowRoomTimeout = room
+		dungeonFollowEngageDelayMin, dungeonFollowEngageDelayMax = engageMin, engageMax
+		dungeonFollowKillDelayMin, dungeonFollowKillDelayMax = killMin, killMax
+		dungeonFollowBossFightMin, dungeonFollowBossFightMax = bossMin, bossMax
+	})
+}
+
 // The follower duty answers a room projection the server pushed into a session
-// that never opened a run itself. The ordinary monsters are reported dead; the
-// boss row is left to the run's leader, and the follower never asks for a room
+// that never opened a run itself. Every blocking actor is fought the way a
+// player fights, the boss row included, and the follower never asks for a room
 // move of its own.
-func TestSessionDungeonFollowDutyKillsANewRoomButNotTheBoss(t *testing.T) {
+func TestSessionDungeonFollowDutyFightsEveryActorIncludingTheBoss(t *testing.T) {
+	shrinkDungeonFollowPacing(t)
 	session, serverConn := newDungeonTestSession(t)
 	dispatchDungeonStartMap(session, dungeonTestStartMapBody(0, 0, 100, []protocol.DungeonStartMapActor{
 		dungeonTestMonster(5001),
@@ -22,7 +43,7 @@ func TestSessionDungeonFollowDutyKillsANewRoomButNotTheBoss(t *testing.T) {
 	if active, followed := session.dungeon.followState(); !active || !followed {
 		t.Fatalf("room projection state = (active %v, followed %v) want both set", active, followed)
 	}
-	for _, key := range []uint16{5001, 5002} {
+	for _, key := range []uint16{5001, 6001, 5002} {
 		body := wantDungeonFrame(t, serverConn, protocol.ClassCommand, protocol.CmdDieMonster, "follow death report")
 		if target := binary.LittleEndian.Uint32(body[0:4]); target != uint32(key) {
 			t.Fatalf("op39 target = %d want %d", target, key)
@@ -31,10 +52,9 @@ func TestSessionDungeonFollowDutyKillsANewRoomButNotTheBoss(t *testing.T) {
 			t.Fatalf("op39 owner = %d want the acting character", owner)
 		}
 	}
-	// Nothing else may follow: the boss is the leader's to close, and a room
-	// move is the leader's to ask for.
+	// Nothing else may follow: a room move is the leader's to ask for.
 	if _, _, _, ok := readTestLegacyFrame(serverConn, 400*time.Millisecond); ok {
-		t.Fatal("the follower duty wrote a frame past the ordinary monsters")
+		t.Fatal("the follower duty wrote a frame past the room's actors")
 	}
 }
 
@@ -60,6 +80,7 @@ func TestSessionDungeonFollowDutyLeavesTheLeadersRunToTheLeader(t *testing.T) {
 // under one coordinate. The duty reports each object key once per run and picks
 // the new room's keys up on the next projection.
 func TestSessionDungeonFollowDutyReportsEachRoomOnce(t *testing.T) {
+	shrinkDungeonFollowPacing(t)
 	session, serverConn := newDungeonTestSession(t)
 	room := dungeonTestStartMapBody(0, 0, 100, []protocol.DungeonStartMapActor{
 		dungeonTestMonster(5001),

@@ -391,6 +391,17 @@ func (s *Session) DungeonSince() time.Time {
 	return s.dungeon.startedAt()
 }
 
+// DungeonSettled reports whether the current run has already produced its
+// settlement entry. A settled run is a cleared run: every member owes nothing
+// to it any more except its own exit, and leaving it no longer abandons a
+// party still fighting inside.
+func (s *Session) DungeonSettled() bool {
+	if s == nil || s.dungeon == nil {
+		return false
+	}
+	return s.dungeon.settlementSnapshot() > 0
+}
+
 // DungeonDead reports whether the last death notice was a death rather than a
 // revive.
 func (s *Session) DungeonDead() bool {

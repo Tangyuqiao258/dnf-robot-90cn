@@ -2,6 +2,7 @@ package cn90
 
 import (
 	"context"
+	"math/rand"
 	"time"
 
 	foundationlog "robot/internal/foundation/log"
@@ -13,35 +14,63 @@ import (
 // leader's op45 commits, moveRuntimePartyFollowers moves every member's
 // runtime into the next room and pushes each member its own op29 room
 // projection (dnfbridge/dungeon_navigation_runtime.go). What a follower can
-// still do is clear the room it was moved into. This protocol generation keeps
+// still do is fight the room it was moved into. This protocol generation keeps
 // no monster hit points, so a room clears when every blocking actor has been
 // reported dead with op39, and a party member's report is validated against its
 // own runtime and then projected to the rest of the room
 // (dnfbridge/dungeon_party_combat_runtime.go
 // handleRuntimePartyDungeonMonsterDeathRequest). That is the whole duty: watch
-// the room projections, report the ordinary monsters of each new room dead, and
+// the room projections, fight each new room's actors the way a player does, and
 // never send op45 - a follower that also moved would fight the leader's walk.
 //
-// Only ordinary monsters are reported. The boss row is deliberately left to the
-// run's leader: its death opens the op31 settlement entry for every member, and
-// a follower that closed the run the instant the party entered the boss room
-// would take the clear away from the character whose walk it is. The human-led
-// case is the one that matters - the player crosses a door with no delay
-// because the room behind it is already clear, while the boss room stays
-// theirs.
+// Every blocking actor is fought, bosses and hostile AI/APC bosses included:
+// the follower is a player at the keyboard, and a player fights whatever stands
+// in the room. The deaths are paced like a real fight (engage delay, one kill
+// every couple of seconds, a long boss fight) instead of the instant sweep the
+// duty used to make - a follower that reports the whole room dead before its
+// leader has even loaded is not playing the game, and it steals the kill credit
+// and drops from the human who actually fights the monsters.
 //
 // The duty runs only when the server pulled this session into someone else's
 // run (dungeonState.followed). A session that opened its own run walks it with
 // ClearDungeon instead, and two walkers on one run would report the same deaths
 // twice.
 
-const (
-	// dungeonFollowRoomTimeout bounds the death reports of one room. The writes
+// The pace knobs are variables rather than constants so tests can shrink them;
+// production always uses the values set here.
+var (
+	// dungeonFollowRoomTimeout bounds one room, boss fight included. The writes
 	// go to a socket that is already being written by the settlement worker
 	// only after a run settles, so the ceiling only stops a stalled connection
 	// from holding the run's room signal forever.
-	dungeonFollowRoomTimeout = 15 * time.Second
+	dungeonFollowRoomTimeout = 2 * time.Minute
+	// dungeonFollowEngageDelay is how long the follower "walks into" a newly
+	// projected room before the first swing. A player reads the room, picks a
+	// target and closes in; reporting a death the instant the projection lands
+	// is the shape that cleared rooms while the human was still loading.
+	dungeonFollowEngageDelayMin = 900 * time.Millisecond
+	dungeonFollowEngageDelayMax = 1800 * time.Millisecond
+	// dungeonFollowKillDelay spaces the ordinary kills of a room. It is the
+	// time one monster takes to die under a real player's rotation, not a wire
+	// pacing knob.
+	dungeonFollowKillDelayMin = 1400 * time.Millisecond
+	dungeonFollowKillDelayMax = 3000 * time.Millisecond
+	// dungeonFollowBossFight is the fight length for a boss or hostile AI/APC
+	// boss row. The human fights the same boss in the same room; the follower's
+	// report only lands after a fight of comparable length, so whichever client
+	// actually finishes the boss wins the race instead of the follower sweeping
+	// the room on arrival.
+	dungeonFollowBossFightMin = 22 * time.Second
+	dungeonFollowBossFightMax = 40 * time.Second
 )
+
+// dungeonFollowDelay returns a random duration in [min, max].
+func dungeonFollowDelay(min, max time.Duration) time.Duration {
+	if max <= min {
+		return min
+	}
+	return min + time.Duration(rand.Int63n(int64(max-min)+1))
+}
 
 // dungeonFollowRun is the worker's bookkeeping across signals. It lives in the
 // worker goroutine only.
@@ -87,9 +116,10 @@ func (s *Session) startDungeonFollowDuty(ctx context.Context) {
 	}()
 }
 
-// clearFollowedRoom reports the ordinary monsters of the newest room dead. It
-// returns immediately for anything that is not a follower's room projection, so
-// the leader's own walk and every town session pass through untouched.
+// clearFollowedRoom fights the actors of the newest room the way a player
+// would. It returns immediately for anything that is not a follower's room
+// projection, so the leader's own walk and every town session pass through
+// untouched.
 func (s *Session) clearFollowedRoom(ctx context.Context, state *dungeonFollowRun) {
 	if s == nil || s.dungeon == nil || state == nil {
 		return
@@ -122,31 +152,50 @@ func (s *Session) clearFollowedRoom(ctx context.Context, state *dungeonFollowRun
 	if s.DungeonDead() || s.dungeon.settlementSnapshot() > 0 {
 		return
 	}
-	keys := make([]uint16, 0, len(view.Actors))
+	type followTarget struct {
+		key  uint16
+		boss bool
+	}
+	targets := make([]followTarget, 0, len(view.Actors))
 	for _, actor := range view.Actors {
-		if !actor.Monster() || actor.Boss() || state.reported[actor.ObjectKey] {
+		if !actor.Monster() || state.reported[actor.ObjectKey] {
 			continue
 		}
-		keys = append(keys, actor.ObjectKey)
+		targets = append(targets, followTarget{key: actor.ObjectKey, boss: actor.Boss()})
 	}
-	if len(keys) == 0 {
+	if len(targets) == 0 {
 		return
 	}
 	foundationlog.Robotf("CN90_DUNGEON_FOLLOW_ROOM cid=%d room=%d:%d map=%d monsters=%d\n",
-		s.selfCharacterID, view.X, view.Y, view.MapID, len(keys))
+		s.selfCharacterID, view.X, view.Y, view.MapID, len(targets))
 	roomCtx, cancel := context.WithTimeout(ctx, dungeonFollowRoomTimeout)
 	defer cancel()
-	for index, key := range keys {
-		if err := s.client.ReportMonsterDeath(roomCtx, uint32(key), s.selfCharacterID); err != nil {
-			foundationlog.Robotf("CN90_DUNGEON_FOLLOW_KILL_FAILED cid=%d room=%d:%d object_key=%d err=%v\n",
-				s.selfCharacterID, view.X, view.Y, key, err)
+	// Walk into the room and pick the first target before the first report.
+	if err := dungeonClearSleep(roomCtx, dungeonFollowDelay(
+		dungeonFollowEngageDelayMin, dungeonFollowEngageDelayMax)); err != nil {
+		return
+	}
+	for _, target := range targets {
+		// The run can end under a long boss fight: the leader's own kill opens
+		// the settlement entry for every member, and a dead follower reports
+		// nothing. Stop instead of racing a settled run.
+		if s.DungeonDead() || s.dungeon.settlementSnapshot() > 0 {
 			return
 		}
-		state.reported[key] = true
-		if index < len(keys)-1 {
-			if err := dungeonClearSleep(roomCtx, dungeonClearKillInterval); err != nil {
-				return
-			}
+		delay := dungeonFollowDelay(dungeonFollowKillDelayMin, dungeonFollowKillDelayMax)
+		if target.boss {
+			delay = dungeonFollowDelay(dungeonFollowBossFightMin, dungeonFollowBossFightMax)
 		}
+		if err := dungeonClearSleep(roomCtx, delay); err != nil {
+			return
+		}
+		if err := s.client.ReportMonsterDeath(roomCtx, uint32(target.key), s.selfCharacterID); err != nil {
+			foundationlog.Robotf("CN90_DUNGEON_FOLLOW_KILL_FAILED cid=%d room=%d:%d object_key=%d err=%v\n",
+				s.selfCharacterID, view.X, view.Y, target.key, err)
+			return
+		}
+		state.reported[target.key] = true
+		foundationlog.Robotf("CN90_DUNGEON_FOLLOW_KILL cid=%d room=%d:%d object_key=%d boss=%t\n",
+			s.selfCharacterID, view.X, view.Y, target.key, target.boss)
 	}
 }

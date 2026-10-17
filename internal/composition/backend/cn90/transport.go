@@ -387,6 +387,21 @@ func (t *ActionTransport) DungeonState(uid int) (active bool, selfStarted bool, 
 	return true, selfStarted, reporter.DungeonSince()
 }
 
+// DungeonSettled reports whether the session's active run has already produced
+// its settlement entry, i.e. the run is cleared and only the member's own exit
+// is left.
+func (t *ActionTransport) DungeonSettled(uid int) bool {
+	session, err := t.session(uid)
+	if err != nil {
+		return false
+	}
+	provider, ok := session.(interface{ DungeonSettled() bool })
+	if !ok {
+		return false
+	}
+	return provider.DungeonSettled()
+}
+
 // PartySince reports when the session's current party appeared, and whether the
 // server has reported a roster at all.
 func (t *ActionTransport) PartySince(uid int) (time.Time, bool) {
