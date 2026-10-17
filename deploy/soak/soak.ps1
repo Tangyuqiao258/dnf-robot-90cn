@@ -169,7 +169,7 @@ function Invoke-Start {
             'guard', '-GuardPid', $proc.Id, '-RobotDir', $RobotDir, '-StateDir', $StateDir,
             '-FreeFloorMB', $FreeFloorMB, '-WsCeilMB', $WsCeilMB
         )
-        $guard = Start-Process powershell -ArgumentList $guardArgs -PassThru -WindowStyle Hidden
+        $guard = Start-Process (Join-Path $PSHOME 'powershell.exe') -ArgumentList $guardArgs -PassThru -WindowStyle Hidden
         Write-Host "guard pid  : $($guard.Id)  (free floor ${FreeFloorMB}MB, ws ceiling ${WsCeilMB}MB)"
         Write-Host "guard log  : $GuardLog"
     } else {
