@@ -5,6 +5,7 @@
 90CN(DNF 单机服务端)的**假人机器人**:一个直接讲服务端线路协议的进程内客户端,把建号、上线、配装、走位、组队、摆摊、拍卖、邮件等行为批量自动化,用来把城镇点活。机器人以真实角色身份登录,服务端把它当普通玩家对待——它不是外挂,也不修改客户端。
 
 - 配套服务端:[十月十日酸奶 90 轮回服务端](https://pan.baidu.com/s/13Zh36jIogpWNvlh51M9Pnw?pwd=wcbr)(百度网盘,提取码 `wcbr`)。
+- 本仓适配的服务端源码(修改版,含全部服务端侧改动):[LittleDragon/server-90](https://gitgud.io/LittleDragon/server-90)。
 - 协议实现:`internal/protocol/cn90`(线路帧/opcode/UDP/花名册);版本特化适配层:`internal/composition/backend/cn90`。
 - 分层层级、生命周期与新增适配端的约束见 [`doc/架构设计.md`](doc/架构设计.md),目录职责见 [`doc/代码图谱.md`](doc/代码图谱.md)。
 
