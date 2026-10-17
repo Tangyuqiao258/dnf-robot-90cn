@@ -18,6 +18,18 @@ import (
 // uses for every other player on screen. The follower then walks to a point
 // near that leader through the ordinary op35/op36 move path, which the server
 // accepts from any session whose town-scene snapshot matches the character.
+//
+// The 0x0016 fan-out is why a position notice also answers the question the
+// packet itself does not ask: who else is standing here. OnlinePlayerManager
+// .UpdatePosition collects the mover's peers from byArea[key] alone, and the
+// two other senders of 0x0016 (initial_town_location_notifications.go, the
+// op36 transition reply) address only the mover's own session with the mover's
+// own actor key. So a 0x0016 naming the leader is proof that the leader stands
+// in this session's town area, and it is the only cheap proof there is: a
+// leader that never crosses an area boundary never triggers the 0x0017 that
+// carries the town and area explicitly, which left every follower of a
+// stationary-area leader without an area to walk to and therefore standing
+// still.
 
 // partyFollowState is the follower's view of its party leader. The packet
 // observer writes it from the drain goroutine while the scheduler reads it
@@ -99,8 +111,13 @@ func (s *Session) observePartyFollow(packet protocol.Packet) {
 		if !ok {
 			return
 		}
-		if state.observePosition(notice.ActorKey, notice.X, notice.Y) {
+		village, area, standing := s.ownTownArea()
+		tracked, located := state.observePosition(notice.ActorKey, notice.X, notice.Y, village, area, standing)
+		if tracked {
 			foundationlog.Robotf("CN90_PARTY_FOLLOW_POSITION cid=%d leader=%d x=%d y=%d\n", s.selfCharacterID, notice.ActorKey, notice.X, notice.Y)
+		}
+		if located {
+			foundationlog.Robotf("CN90_PARTY_FOLLOW_COLOCATED cid=%d leader=%d town=%d area=%d\n", s.selfCharacterID, notice.ActorKey, village, area)
 		}
 	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiUserArea:
 		notice, ok := protocol.ParseUserAreaNotice(packet.Body)
@@ -111,6 +128,22 @@ func (s *Session) observePartyFollow(packet protocol.Packet) {
 			foundationlog.Robotf("CN90_PARTY_FOLLOW_AREA cid=%d leader=%d town=%d area=%d x=%d y=%d\n", s.selfCharacterID, notice.ActorKey, notice.Town, notice.Area, notice.X, notice.Y)
 		}
 	}
+}
+
+// ownTownArea reports the town area this session last had confirmed by the
+// server. It is the area a leader-position notice implicitly places the leader
+// in, and it is deliberately read from the transition answers rather than from
+// the scheduler's own idea of where the robot stands: the two agree in steady
+// state, and the one the server answered is the one the broadcast was scoped to.
+func (s *Session) ownTownArea() (int, int, bool) {
+	if s == nil {
+		return 0, 0, false
+	}
+	observation, valid := s.LastTownAreaObservation()
+	if !valid {
+		return 0, 0, false
+	}
+	return observation.village, observation.area, true
 }
 
 // PartyFollowTarget returns the leader's last known town position. It is the
@@ -156,15 +189,29 @@ func (st *partyFollowState) promoteCandidate(self uint16) (uint16, bool) {
 	return st.leader, true
 }
 
-func (st *partyFollowState) observePosition(actor, x, y uint16) bool {
+// observePosition records one leader position notice and reports, first,
+// whether the notice belonged to the tracked leader and, second, whether it
+// also taught the state where the leader is standing.
+//
+// The second answer comes from the session's own confirmed town area, which is
+// sound because the server only broadcasts a mover's 0x0016 to the players
+// registered in the mover's area: reading the notice at all means sharing it.
+// A session that has not had an area transition answered yet (the login room,
+// before the first escape) has nothing to stamp and leaves the area unknown,
+// which is the same standing the follower was in before this existed.
+func (st *partyFollowState) observePosition(actor, x, y uint16, village, area int, standing bool) (bool, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if !st.hasLeader || actor != st.leader {
-		return false
+		return false, false
 	}
 	st.x, st.y = int(x), int(y)
 	st.observed = time.Now()
-	return true
+	located := standing && (st.village != village || st.area != area)
+	if located {
+		st.village, st.area = village, area
+	}
+	return true, located
 }
 
 func (st *partyFollowState) observeArea(actor uint16, village, area int, x, y uint16) bool {

@@ -91,6 +91,39 @@ type dungeonState struct {
 	// into a run it never asked for, and how long it should stand in one is
 	// measured from the run rather than from whenever its own timer fires.
 	since time.Time
+	// room is the latest op29 projection of the room the character stands in.
+	// The clearing client reads the room's actors and neighbours from it; the
+	// maze itself is never announced, so the room projection is the only map
+	// there is.
+	room    protocol.DungeonStartMap
+	hasRoom bool
+	// roomSeq increments with every op29. A room move is answered with the new
+	// room rather than with an acknowledgement, so a fresh sequence is the only
+	// proof the server accepted it.
+	roomSeq uint64
+	// settlementSeq increments with every op31 settlement entry. It is the gate
+	// op46 is validated against, so the play result waits for a sequence past
+	// the one the run was observed with.
+	settlementSeq uint64
+	// settleQueue wakes the settlement worker. It is set once per session by
+	// startDungeonSettlement and is nil for sessions that never start it, so a
+	// signal is safe from any observer.
+	settleQueue chan struct{}
+	// The post-settlement handshake state. The server walks the result page as
+	// a client-driven chain - op46, op123, op69, op70 - and silently drops the
+	// op42 exit until every step is on its side, so each step is recorded here:
+	// playResultSent, statisticSent, clearRewardSeen (the op35 projection),
+	// scoreScrollAcked (the class-1 op69 answer) and cardLayoutSeen (the class-1
+	// op70 answer). The timestamps drive resends; a duplicate is replay-safe on
+	// every one of these requests.
+	playResultSent   bool
+	statisticSent    bool
+	clearRewardSeen  bool
+	scoreScrollAcked bool
+	cardLayoutSeen   bool
+	playResultAt     time.Time
+	scoreScrollAt    time.Time
+	cardLayoutAt     time.Time
 }
 
 func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
@@ -102,6 +135,11 @@ func (st *dungeonState) markActive(dungeonID uint32, difficulty byte) {
 	st.dead = false
 	st.loaded = false
 	st.since = time.Now()
+	st.room = protocol.DungeonStartMap{}
+	st.hasRoom = false
+	st.roomSeq = 0
+	st.settlementSeq = 0
+	st.resetSettlementHandshakeLocked()
 }
 
 // markLeft clears the run. The server sends the town transition (class0/op24)
@@ -116,6 +154,11 @@ func (st *dungeonState) markLeft() {
 	st.dead = false
 	st.loaded = false
 	st.since = time.Time{}
+	st.room = protocol.DungeonStartMap{}
+	st.hasRoom = false
+	st.roomSeq = 0
+	st.settlementSeq = 0
+	st.resetSettlementHandshakeLocked()
 }
 
 func (st *dungeonState) markDeath(revived bool) {
@@ -146,6 +189,150 @@ func (st *dungeonState) startedAt() time.Time {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 	return st.since
+}
+
+// markRoom records one op29 projection and bumps the room sequence. A repeated
+// projection of the same room still bumps it: the sequence answers "did the
+// server say anything new", not "did the coordinate change", and a move that
+// lands on a layered room can be answered by the same coordinate.
+func (st *dungeonState) markRoom(view protocol.DungeonStartMap) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.room = view
+	st.hasRoom = true
+	st.roomSeq++
+}
+
+// roomSnapshot returns the latest room projection and its sequence.
+func (st *dungeonState) roomSnapshot() (protocol.DungeonStartMap, uint64, bool) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.room, st.roomSeq, st.hasRoom
+}
+
+// markSettlement records one op31 settlement entry.
+func (st *dungeonState) markSettlement() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.settlementSeq++
+}
+
+// settlementSnapshot returns the number of settlement entries seen for this
+// run.
+func (st *dungeonState) settlementSnapshot() uint64 {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.settlementSeq
+}
+
+// settlementHandshake is the worker's view of the post-settlement chain. It is
+// one snapshot rather than five getters so the worker never mixes a flag from
+// before a run reset with a timestamp from after it.
+type dungeonSettlementHandshake struct {
+	playResultSent   bool
+	statisticSent    bool
+	clearRewardSeen  bool
+	scoreScrollAcked bool
+	cardLayoutSeen   bool
+	playResultAt     time.Time
+	scoreScrollAt    time.Time
+	cardLayoutAt     time.Time
+}
+
+func (st *dungeonState) settlementHandshake() dungeonSettlementHandshake {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return dungeonSettlementHandshake{
+		playResultSent:   st.playResultSent,
+		statisticSent:    st.statisticSent,
+		clearRewardSeen:  st.clearRewardSeen,
+		scoreScrollAcked: st.scoreScrollAcked,
+		cardLayoutSeen:   st.cardLayoutSeen,
+		playResultAt:     st.playResultAt,
+		scoreScrollAt:    st.scoreScrollAt,
+		cardLayoutAt:     st.cardLayoutAt,
+	}
+}
+
+func (st *dungeonState) resetSettlementHandshakeLocked() {
+	st.playResultSent = false
+	st.statisticSent = false
+	st.clearRewardSeen = false
+	st.scoreScrollAcked = false
+	st.cardLayoutSeen = false
+	st.playResultAt = time.Time{}
+	st.scoreScrollAt = time.Time{}
+	st.cardLayoutAt = time.Time{}
+}
+
+// claimPlayResult reserves the play result for a caller that is about to send
+// it, without claiming it was sent. The settlement worker treats the timestamp
+// as the last send, so it stays quiet for one resend interval and takes over
+// only if the caller's own send never lands.
+func (st *dungeonState) claimPlayResult(at time.Time) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.playResultSent {
+		return
+	}
+	st.playResultAt = at
+}
+
+func (st *dungeonState) markPlayResultSent(at time.Time) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.playResultSent = true
+	st.playResultAt = at
+}
+
+func (st *dungeonState) markStatisticSent() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.statisticSent = true
+}
+
+func (st *dungeonState) markClearRewardSeen() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.clearRewardSeen = true
+}
+
+func (st *dungeonState) markScoreScrollRequested(at time.Time) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.scoreScrollAt = at
+}
+
+func (st *dungeonState) markScoreScrollAcked() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.scoreScrollAcked = true
+}
+
+func (st *dungeonState) markCardLayoutRequested(at time.Time) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.cardLayoutAt = at
+}
+
+func (st *dungeonState) markCardLayoutSeen() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.cardLayoutSeen = true
+}
+
+// signalSettlement wakes the settlement worker without ever blocking the
+// packet observer: the queue holds one token and extra signals collapse into
+// it, because the worker re-reads the whole state on every pass.
+func (st *dungeonState) signalSettlement() {
+	queue := st.settleQueue
+	if queue == nil {
+		return
+	}
+	select {
+	case queue <- struct{}{}:
+	default:
+	}
 }
 
 // InDungeon reports whether the server has an active run for this session.
@@ -210,6 +397,11 @@ func (s *Session) startDungeonTracking(ctx context.Context) {
 		defer cleanup()
 		<-ctx.Done()
 	}()
+	// The settlement worker is part of tracking rather than of the revive
+	// switch: leaving a completed run is required for every session that can
+	// be pulled into one, follower included, and it never writes without the
+	// op31 entry that opens a completed run.
+	s.startDungeonSettlement(ctx)
 }
 
 // startDungeonRevive runs the worker that answers a death notice with an op41
@@ -297,6 +489,44 @@ func (s *Session) observeDungeon(packet protocol.Packet) {
 		if active, _, _, _ := state.snapshot(); !active {
 			state.markActive(0, 0)
 			foundationlog.Robotf("CN90_DUNGEON_FOLLOWED cid=%d op=%d\n", s.selfCharacterID, packet.Type)
+		}
+		if packet.Type == protocol.NotiDungeonStartMap {
+			// The room projection is what the clearing client walks and kills
+			// with; parsing it here keeps the packet observer the only writer.
+			if view, err := protocol.ParseDungeonStartMap(packet.Body); err == nil {
+				state.markRoom(view)
+			}
+		}
+	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiDungeonSettlementEntry:
+		// The settlement window opening is the gate the op46 play result is
+		// validated against, so it is recorded per run rather than acted on.
+		if active, _, _, _ := state.snapshot(); active {
+			state.markSettlement()
+			// The settlement worker walks the rest of the chain from here: op46
+			// then op123 then op69 then op70, whichever of them this session
+			// still owes. Followers owe the same chain as the leader.
+			state.signalSettlement()
+		}
+	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiDungeonClearReward:
+		// The clear-reward projection is the server's own proof that the op46
+		// play result was accepted rather than dropped; the card requests are
+		// only answered after it.
+		if active, _, _, _ := state.snapshot(); active && state.settlementSnapshot() > 0 {
+			state.markClearRewardSeen()
+			state.signalSettlement()
+		}
+	case packet.Class == protocol.ClassCommand && packet.Type == protocol.CmdScoreScrollState:
+		// The class-1 op69 answer is what unlocks the op70 card-layout request.
+		if active, _, _, _ := state.snapshot(); active && state.settlementSnapshot() > 0 {
+			state.markScoreScrollAcked()
+			state.signalSettlement()
+		}
+	case packet.Class == protocol.ClassCommand && packet.Type == protocol.CmdCardSelectRightState:
+		// The class-1 op70 layout is the last client-side gate before op42
+		// accepts a completed run's exit.
+		if active, _, _, _ := state.snapshot(); active && state.settlementSnapshot() > 0 {
+			state.markCardLayoutSeen()
+			state.signalSettlement()
 		}
 	case packet.Class == protocol.ClassNotice && packet.Type == protocol.NotiFinishLoading:
 		// The character-state push that answers the loading acknowledgement.

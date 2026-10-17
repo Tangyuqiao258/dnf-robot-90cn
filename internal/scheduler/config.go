@@ -345,7 +345,9 @@ func (m *RobotManager) applyBackendConfigPolicy(rc *robotconfig.RuntimeConfig) {
 		rc.AutoDungeonEnter = false
 		// A party run needs both halves: the party transport to gather the
 		// members and the entry transport to start the run they walk into.
+		// Clearing rides the same run, so it goes with them.
 		rc.AutoPartyDungeon = false
+		rc.AutoDungeonClear = false
 	}
 	// The reply rides on the same directed-message transport as a shout, so a
 	// backend that cannot send one cannot answer one either.

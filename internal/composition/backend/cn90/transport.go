@@ -319,6 +319,33 @@ func (t *ActionTransport) EnterDungeon(uid int, dungeonID uint32, difficulty byt
 	return nil
 }
 
+// dungeonClearActionTimeout is the ceiling for one whole clear. It is larger
+// than the entry budget because a clear walks the maze room by room, and each
+// refused move costs its own room wait.
+const dungeonClearActionTimeout = 6 * time.Minute
+
+// ClearDungeon walks and clears the run the session's party is inside, as the
+// run's leader. It returns once the settlement has been opened and answered, or
+// with the reason the walk could not finish; the run is left as it stands.
+func (t *ActionTransport) ClearDungeon(uid int) error {
+	if t == nil {
+		return fmt.Errorf("90CN dungeon clear needs a transport")
+	}
+	session, err := t.session(uid)
+	if err != nil {
+		return err
+	}
+	clearer, ok := session.(interface {
+		ClearDungeon(context.Context) error
+	})
+	if !ok {
+		return fmt.Errorf("90CN session does not expose the dungeon clear protocol")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dungeonClearActionTimeout)
+	defer cancel()
+	return clearer.ClearDungeon(ctx)
+}
+
 // markDungeonOrigin records whether the run a session is inside was started by
 // this transport. A robot can end up in a dungeon without ever asking for one:
 // the server drags every party member into the leader's run. The exit duty

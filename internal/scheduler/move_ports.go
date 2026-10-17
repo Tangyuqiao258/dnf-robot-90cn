@@ -46,6 +46,14 @@ func (e moveActionEnv) LoadMapCatalog() []shared.MapCatalogItem {
 	return e.manager.loadMapCatalog()
 }
 
+// LogMoveDiag carries the move capability's quiet refusals into the robot log
+// (robotaction.moveDiagSink). The line lands beside the party-follow lines the
+// backend already writes, so a follower held at an area door reads as one story
+// in one file.
+func (e moveActionEnv) LogMoveDiag(format string, args ...interface{}) {
+	robotLogf(format, args...)
+}
+
 // CrowdMapRule carries the world's per-map population policy into the move
 // capability, which probes for it. A robot walking somewhere reads the same
 // rule a robot being placed reads, so an area the operator closed cannot be

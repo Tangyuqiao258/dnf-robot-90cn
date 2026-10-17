@@ -23,6 +23,14 @@ type MoveEnv interface {
 	SelectRobots(req robotcap.CommandRequest) ([]robotcap.Info, error)
 }
 
+// moveDiagSink is the optional diagnostic channel a move environment may offer
+// for the moves the capability holds back quietly. It is probed for the way the
+// spawn policy is probed (robotspawn.CrowdPolicy), so an environment that offers
+// no sink - the tests' - keeps the silence.
+type moveDiagSink interface {
+	LogMoveDiag(format string, args ...interface{})
+}
+
 type FollowTarget struct {
 	Village int
 	Area    int
@@ -119,8 +127,15 @@ func (s MoveService) Move(req robotcap.CommandRequest, rc robotconfig.RuntimeCon
 
 func (s MoveService) AutoMove(info robotcap.Info, rc robotconfig.RuntimeConfig, maps []shared.MapCatalogItem, follow *FollowTarget) error {
 	targetVillage, targetArea := info.Village, info.Area
+	// A follower whose leader is in the map the follower already stands in
+	// follows nobody while that map has no movement geometry: the character-list
+	// Seria room every login opens in is exactly that, and the room is the thing
+	// to leave. Falling through to the door below is what keeps a party from
+	// parking a member in a room no player can walk into.
+	followInPlace := follow != nil && follow.Village == info.Village && follow.Area == info.Area &&
+		!robotspawn.HasUsableMap(maps, info.Village, info.Area)
 	var targetX, targetY int
-	if follow != nil {
+	if follow != nil && !followInPlace {
 		targetVillage, targetArea = follow.Village, follow.Area
 		if targetVillage != info.Village || targetArea != info.Area {
 			if !robotspawn.HasUsableMap(maps, targetVillage, targetArea) {
@@ -153,6 +168,7 @@ func (s MoveService) AutoMove(info robotcap.Info, rc robotconfig.RuntimeConfig, 
 	// move quietly is what keeps a closed scene from filling with robots that
 	// were only told to walk somewhere.
 	if (targetVillage != info.Village || targetArea != info.Area) && s.transitRefused(targetVillage, targetArea) {
+		s.logFollowTransitRefused(info, follow, targetVillage, targetArea)
 		targetVillage, targetArea = info.Village, info.Area
 		targetX, targetY = s.randomTarget(info, rc, maps)
 	}
@@ -171,6 +187,24 @@ func (s MoveService) AutoMove(info robotcap.Info, rc robotconfig.RuntimeConfig, 
 		}
 	}
 	return nil
+}
+
+// logFollowTransitRefused reports a party follower the crowd transit ceiling
+// turned back. A plain wander refused the same way stays silent by design -
+// quiet refusal is what keeps a closed scene from filling with robots that were
+// only told to walk somewhere - but a follower refused here never leaves its
+// area, and the leader is on the other side of that door, so this is the one
+// refusal an operator has to be able to see.
+func (s MoveService) logFollowTransitRefused(info robotcap.Info, follow *FollowTarget, targetVillage, targetArea int) {
+	if follow == nil {
+		return
+	}
+	sink, ok := s.Env.(moveDiagSink)
+	if !ok {
+		return
+	}
+	sink.LogMoveDiag("PARTY_FOLLOW_TRANSIT_REFUSED uid=%d cid=%d from=%d/%d to=%d/%d leader=%d/%d\n",
+		info.UID, info.CID, info.Village, info.Area, targetVillage, targetArea, follow.Village, follow.Area)
 }
 
 // strandedDoor answers where a robot that stands in a map the catalog does not

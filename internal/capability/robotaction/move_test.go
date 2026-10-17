@@ -204,6 +204,34 @@ func TestAutoMoveWalksOutOfTheSeriaRoomThroughADoor(t *testing.T) {
 	}
 }
 
+// A follower whose leader stands in the same unusable room follows nobody: the
+// room is what it has to leave, and a leader that is in it is leaving too. The
+// follow branch would otherwise walk the follower around a room no player can
+// enter and keep it there for the life of the party.
+func TestAutoMoveWalksOutOfAnUnusableRoomEvenWhileFollowing(t *testing.T) {
+	env := &captureMoveEnv{}
+	service := MoveService{Env: env}
+	source := robotcap.Info{UID: 101, Village: 38, Area: 1, X: 450, Y: 234}
+	rc := robotconfig.RuntimeConfig{MoveSteps: 2, MoveSpeedMin: 100, MoveSpeedMax: 100}
+	maps := []shared.MapCatalogItem{
+		{Village: 38, Area: 1, Use: false, Links: []shared.MapAreaKey{{Village: 39, Area: 0}}},
+		{Village: 39, Area: 0, Use: true, Rectangles: []shared.MapRectangle{{XMin: 300, XMax: 360, YMin: 180, YMax: 220}}},
+	}
+	follow := FollowTarget{Village: 38, Area: 1, X: 460, Y: 240}
+
+	if err := service.AutoMove(source, rc, maps, &follow); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.steps) != 2 {
+		t.Fatalf("move steps = %d, want 2", len(env.steps))
+	}
+	for _, step := range env.steps {
+		if step.targetVillage != 39 || step.targetArea != 0 {
+			t.Fatalf("room escape target = %d/%d, want the usable door 39/0", step.targetVillage, step.targetArea)
+		}
+	}
+}
+
 func TestAutoMoveStaysWhenEveryDoorOutOfAnUnusableMapIsUnusable(t *testing.T) {
 	env := &captureMoveEnv{}
 	service := MoveService{Env: env}

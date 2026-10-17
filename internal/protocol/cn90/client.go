@@ -188,6 +188,53 @@ func (c *Client) GiveUpDungeon(ctx context.Context) error {
 	return c.send(ctx, CmdGiveupGame, nil)
 }
 
+// ReportMonsterDeath reports one actor of the current room dead. The body is
+// the shape a live native client writes, with only its target and owner keys
+// replaced; the server validates those two and retains the rest.
+func (c *Client) ReportMonsterDeath(ctx context.Context, targetObjectKey uint32, ownerObjectKey uint16) error {
+	return c.send(ctx, CmdDieMonster, DieMonsterTemplateBody(targetObjectKey, ownerObjectKey))
+}
+
+// MoveDungeonRoom asks the server to walk the run into the room at nextX/nextY.
+// The answer is the room itself - another op29 - so this returns as soon as the
+// request is on the wire; a refused move is never answered at all.
+func (c *Client) MoveDungeonRoom(ctx context.Context, nextX, nextY byte) error {
+	return c.send(ctx, CmdMoveMap, MoveMapBody(nextX, nextY))
+}
+
+// CheckBossDeath asks the server to close the run on a boss it has already been
+// told is dead. The related actor is the acting character's own object key.
+func (c *Client) CheckBossDeath(ctx context.Context, relatedActorObjectKey, targetObjectKey uint16) error {
+	return c.send(ctx, CmdBossDieCheck, BossDieCheckBody(relatedActorObjectKey, targetObjectKey))
+}
+
+// SetPlayResult answers the settlement entry with the client's end-of-run
+// statement.
+func (c *Client) SetPlayResult(ctx context.Context) error {
+	return c.send(ctx, CmdSetPlayResult, SetPlayResultBody())
+}
+
+// SetCharacterStatistic sends the op123 barrier the server requires after the
+// play result before a completed run can be left. The server answers nothing;
+// the packet itself is the statement.
+func (c *Client) SetCharacterStatistic(ctx context.Context) error {
+	return c.send(ctx, CmdCharacterStatistic, CharacterStatisticBody())
+}
+
+// RequestScoreScrollState asks the settlement page for its score-scroll state.
+// The server answers with the class-1 op69 acknowledgement, which is the gate
+// of the card-layout request.
+func (c *Client) RequestScoreScrollState(ctx context.Context) error {
+	return c.send(ctx, CmdScoreScrollState, nil)
+}
+
+// RequestCardSelectRightState asks for the settlement card layout. The server
+// answers with the class-1 op70 layout; without that send its exit gate treats
+// the card chain as unfinished and silently drops op42.
+func (c *Client) RequestCardSelectRightState(ctx context.Context) error {
+	return c.send(ctx, CmdCardSelectRightState, nil)
+}
+
 // DeclareDeath reports the character as dead. Death is client-declared in this
 // protocol generation; the server arms a ten second timer that returns the
 // character to town unless a revive arrives first.

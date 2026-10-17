@@ -158,6 +158,68 @@ func TestSessionPartyFollowAreaNoticeMovesTheLeaderAcrossAreas(t *testing.T) {
 	}
 }
 
+// TestSessionPartyFollowLearnsTheAreaFromTheLeadersOwnMove covers the area a
+// position notice implies without carrying it. A leader that never crosses an
+// area boundary never triggers the 0x0017 that names a town and area, so before
+// this the follower held no area at all, the walk was refused on the geometry
+// guard and every party formed between two robots ended with the follower
+// standing still. The broadcast only reaches players registered in the mover's
+// area, so the notice is itself proof the two share the session's own area.
+func TestSessionPartyFollowLearnsTheAreaFromTheLeadersOwnMove(t *testing.T) {
+	session := newPartyFollowTestSession(t)
+	const leader = 1001
+	acceptLeader(session, leader)
+	session.recordTownAreaObservation(townAreaObservation{village: 39, area: 1, valid: true})
+
+	dispatchPosition(session, leader, 520, 310)
+	target, ok := session.PartyFollowTarget()
+	if !ok {
+		t.Fatal("session lost the leader position")
+	}
+	if target.Village != 39 || target.Area != 1 {
+		t.Fatalf("target = %+v want village=39 area=1", target)
+	}
+}
+
+// TestSessionPartyFollowWithoutAConfirmedAreaKeepsNone is the other half: a
+// session the server has never answered an area transition for - the login room
+// before the first escape - has nothing to stamp and must not invent a map.
+func TestSessionPartyFollowWithoutAConfirmedAreaKeepsNone(t *testing.T) {
+	session := newPartyFollowTestSession(t)
+	const leader = 1001
+	acceptLeader(session, leader)
+	dispatchPosition(session, leader, 520, 310)
+
+	target, ok := session.PartyFollowTarget()
+	if !ok {
+		t.Fatal("session lost the leader position")
+	}
+	if target.Village != 0 || target.Area != 0 {
+		t.Fatalf("an unconfirmed session named an area: %+v", target)
+	}
+}
+
+// TestSessionPartyFollowCoLocationOutranksAStaleAreaNotice pins the precedence:
+// a 0x0017 names where the leader went while the follower stayed behind, so the
+// next position notice from that leader - which can only be delivered to an
+// area they now share again - is the newer fact and replaces it.
+func TestSessionPartyFollowCoLocationOutranksAStaleAreaNotice(t *testing.T) {
+	session := newPartyFollowTestSession(t)
+	const leader = 1001
+	acceptLeader(session, leader)
+	session.recordTownAreaObservation(townAreaObservation{village: 39, area: 1, valid: true})
+
+	session.dispatchPacket(protocol.Packet{Class: protocol.ClassNotice, Type: protocol.NotiUserArea, Body: testUserAreaBody(leader, 40, 2, 700, 200)})
+	if target, _ := session.PartyFollowTarget(); target.Village != 40 || target.Area != 2 {
+		t.Fatalf("area notice did not move the leader: %+v", target)
+	}
+	dispatchPosition(session, leader, 520, 310)
+	target, _ := session.PartyFollowTarget()
+	if target.Village != 39 || target.Area != 1 {
+		t.Fatalf("target = %+v want village=39 area=1", target)
+	}
+}
+
 func TestSessionPartyFollowTradePromptIsNotACandidate(t *testing.T) {
 	session := newPartyFollowTestSession(t)
 	// Mode 1 is the trade prompt and is never answered, so a following session

@@ -58,6 +58,10 @@ func Default() RuntimeConfig {
 		AutoPartyDungeon: false, AutoPartyDungeonSize: 3,
 		AutoPartyDungeonIntervalMinSec: 600, AutoPartyDungeonIntervalMaxSec: 1800,
 		AutoPartyDungeonDwellSec: 60, AutoPartyDungeonInviteTimeoutSec: 12,
+		// Clearing the run is opt-in on top of the party entry: entry alone only
+		// walks the members into the first room, and the room-by-room walk needs
+		// the server's maze topology to cooperate.
+		AutoDungeonClear:                false,
 		AutoServerNotice:                false,
 		ServerNoticeRobotIntervalMinSec: 900,
 		ServerNoticeRobotIntervalMaxSec: 3600,

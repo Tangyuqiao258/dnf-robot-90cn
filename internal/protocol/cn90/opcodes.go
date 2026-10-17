@@ -26,10 +26,10 @@ const (
 	// leave retires the party; a leader leaving with members still in it re-forms
 	// it under a successor, which is why the whole fleet leaves its own way out
 	// instead of the leader clearing the party for everyone.
-	CmdLeaveParty uint16 = 13
-	CmdSelectDungeon      uint16 = 16
-	CmdPeerChat           uint16 = 17
-	CmdMoveItemspace      uint16 = 19
+	CmdLeaveParty    uint16 = 13
+	CmdSelectDungeon uint16 = 16
+	CmdPeerChat      uint16 = 17
+	CmdMoveItemspace uint16 = 19
 	// CmdItemTradeState is the one byte trade-window state. The server decodes
 	// the same number as a scene-transition message and lets the trade handler
 	// claim it first, but only while a trade is open on that session; nothing
@@ -43,13 +43,39 @@ const (
 	// "a run is running" into "the character is standing in it": the character
 	// state push, the skill frame and the room placement all follow it.
 	CmdFinishLoading uint16 = 37
-	CmdDieCharacter  uint16 = 40
-	CmdUseCoin       uint16 = 41
+	// CmdDieMonster reports one actor of the current room as dead. It is the
+	// only way a run advances: the server keeps no monster hit points, so a room
+	// clears when its actors have been reported, not when they were fought.
+	CmdDieMonster   uint16 = 39
+	CmdDieCharacter uint16 = 40
+	CmdUseCoin      uint16 = 41
 	// CmdGiveupGame abandons the run the session is inside and is the only
 	// client-initiated exit besides the death timer. It is refused, silently,
 	// while no run is active, so it can never move a character that is merely
 	// standing in town.
-	CmdGiveupGame         uint16 = 42
+	CmdGiveupGame uint16 = 42
+	// CmdMoveMap walks the run to the next room. The server plans the step from
+	// its own maze topology and answers with the new room rather than with an
+	// acknowledgement, so a move that is refused (not adjacent, or the current
+	// room is not cleared yet) is simply never answered.
+	CmdMoveMap uint16 = 45
+	// CmdSetPlayResult is the client's "the run is over" statement, and the only
+	// body in this set the server validates by shape rather than by field. It is
+	// answered with the settlement projections, and only after the settlement
+	// entry notice has arrived.
+	CmdSetPlayResult uint16 = 46
+	// The settlement-seat requests after op46. The server walks the result
+	// page as a client-driven chain: op69 asks for the score-scroll state,
+	// op70 asks for the card layout, and op123 carries the six-u32 statistic
+	// the server treats as the post-settlement barrier before op42 accepts a
+	// completed run's exit. Each is bodyless except op123.
+	CmdScoreScrollState     uint16 = 69
+	CmdCardSelectRightState uint16 = 70
+	CmdCharacterStatistic   uint16 = 123
+	// CmdBossDieCheck closes the run on a boss the server has already been told
+	// is dead. The boss's death report has to be committed first: a check that
+	// arrives before it is refused outside a tutorial scene.
+	CmdBossDieCheck       uint16 = 117
 	CmdMailboxSend        uint16 = 94
 	CmdMailboxExtractItem uint16 = 95
 	CmdMailboxOpen        uint16 = 96
@@ -109,6 +135,15 @@ const (
 	// is inside a dungeon, not a precondition for entering one.
 	NotiDungeonInfo     uint16 = 28
 	NotiDungeonStartMap uint16 = 29
+	// NotiDungeonSettlementEntry tells the client the run is cleared and the
+	// settlement window is open. Its body is one byte, and it is the gate the
+	// op46 play result is validated against.
+	NotiDungeonSettlementEntry uint16 = 31
+	// NotiDungeonClearReward is the class-0/op35 settlement reward projection
+	// the server sends only after the op46 play result has been accepted. Its
+	// arrival is what opens the card-seat requests (op69/op70) and what proves
+	// op46 was not dropped.
+	NotiDungeonClearReward uint16 = 35
 	// NotiFinishLoading is the class-0 character-state push the server sends
 	// only after it has processed the op37 acknowledgement, so its arrival is
 	// the session's proof that the dungeon scene finished loading. It shares

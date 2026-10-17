@@ -652,6 +652,7 @@ type partyTransport interface {
 	DungeonState(int) (bool, bool, time.Time)
 	EnterDungeon(int, uint32, byte) error
 	LeaveDungeon(int) error
+	ClearDungeon(int) error
 }
 
 // AutoPartyDungeonEnter forms a party out of the robots standing on this robot's
@@ -703,6 +704,11 @@ func (r *RobotRuntime) AutoPartyDungeonEnter(uid int) robotcap.ActionResult {
 		if !ok {
 			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "party_dungeon_unsupported"}
 		}
+		if active, _, _ := party.DungeonState(uid); active {
+			// A robot already inside a run cannot form another one: the run owns
+			// the character until the exit duty takes it back to town.
+			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "already_in_dungeon"}
+		}
 		size := rc.AutoPartyDungeonSize
 		if size < 2 {
 			size = 2
@@ -744,6 +750,23 @@ func (r *RobotRuntime) AutoPartyDungeonEnter(uid int) robotcap.ActionResult {
 			_ = party.LeaveParty(uid)
 			return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed,
 				Message: fmt.Sprintf("party=%d dungeon=%d entry failed: %v", members, dungeonID, err)}
+		}
+		if rc.AutoDungeonClear {
+			// The run is live and the server has already pulled every member
+			// into it. Clearing walks the maze as the leader; the followers ride
+			// along on the server's own projections, so nothing here drives them.
+			if err := party.ClearDungeon(uid); err != nil {
+				// The entry succeeded, so the party really is inside a run the
+				// clear could not finish. Reporting that as a failed entry would
+				// hide the state the operator has to know about; the exit duty
+				// still takes the party out afterwards.
+				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateFailed,
+					Message: fmt.Sprintf("party=%d dungeon=%d entered but the clear failed: %v", members, dungeonID, err)}
+			}
+			return robotcap.ActionResult{
+				UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
+				Message: fmt.Sprintf("party=%d dungeon=%d difficulty=%d cleared", members, dungeonID, difficulty),
+			}
 		}
 		return robotcap.ActionResult{
 			UID: uid, CID: st.CID, OK: true, State: robotcap.ActionStateSent,
@@ -850,7 +873,13 @@ func (r *RobotRuntime) AutoPartyDungeonExit(uid int) robotcap.ActionResult {
 			if hold > 0 && !since.IsZero() && time.Since(since) < hold {
 				return robotcap.ActionResult{UID: uid, CID: st.CID, OK: false, State: robotcap.ActionStateCancelled, Message: "dungeon_hold"}
 			}
-			if !known || !r.partyIsFleet(members) {
+			// A known empty roster is the disband the other members leave behind:
+			// the server sends this member the emptied roster once the last of them
+			// walks out. Nobody is left inside for it to keep company, so the last
+			// member leaves its own run rather than being held as a stranger's
+			// guest forever.
+			disbanded := known && len(members) == 0
+			if !disbanded && (!known || !r.partyIsFleet(members)) {
 				// The run belongs to a party the fleet does not own, so it is not the
 				// fleet's to leave. The robot was asked into it and stays for as long as
 				// that party keeps it.

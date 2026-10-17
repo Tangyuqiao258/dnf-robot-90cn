@@ -205,49 +205,55 @@ type RuntimeConfig struct {
 	AutoPartyDungeonIntervalMaxSec   int    `json:"auto_party_dungeon_interval_max_sec"`
 	AutoPartyDungeonDwellSec         int    `json:"auto_party_dungeon_dwell_sec"`
 	AutoPartyDungeonInviteTimeoutSec int    `json:"auto_party_dungeon_invite_timeout_sec"`
-	AutoChatReply                    bool   `json:"auto_chat_reply"`
-	AutoTrade                        bool   `json:"auto_trade"`
-	AutoSystemAnnouncement           bool   `json:"auto_system_announcement"`
-	AutoServerNotice                 bool   `json:"auto_server_notice"`
-	ServerNoticeRobotIntervalMinSec  int    `json:"server_notice_robot_interval_min_sec"`
-	ServerNoticeRobotIntervalMaxSec  int    `json:"server_notice_robot_interval_max_sec"`
-	ServerNoticeMinGapSec            int    `json:"server_notice_min_gap_sec"`
-	ServerNoticeMaxGapSec            int    `json:"server_notice_max_gap_sec"`
-	ServerNoticeMaxPerHour           int    `json:"server_notice_max_per_hour"`
-	ServerNoticeLotteryPercent       int    `json:"server_notice_lottery_percent"`
-	ServerNoticeVillage              int    `json:"server_notice_village"`
-	ServerNoticeArea                 int    `json:"server_notice_area"`
-	AutoTargetOnlineCount            int    `json:"auto_target_online_count"`
-	AutoMoveIntervalMinSec           int    `json:"auto_move_interval_min_sec"`
-	AutoMoveIntervalMaxSec           int    `json:"auto_move_interval_max_sec"`
-	AutoEmote                        bool   `json:"auto_emote"`
-	AutoEmoteIntervalMinSec          int    `json:"auto_emote_interval_min_sec"`
-	AutoEmoteIntervalMaxSec          int    `json:"auto_emote_interval_max_sec"`
-	AutoEmoteIndexMin                int    `json:"auto_emote_index_min"`
-	AutoEmoteIndexMax                int    `json:"auto_emote_index_max"`
-	AutoShoutIntervalMinSec          int    `json:"auto_shout_interval_min_sec"`
-	AutoShoutIntervalMaxSec          int    `json:"auto_shout_interval_max_sec"`
-	AutoStoreProbabilityPercent      int    `json:"auto_store_probability_percent"`
-	AutoStoreIntervalMinSec          int    `json:"auto_store_interval_min_sec"`
-	AutoStoreIntervalMaxSec          int    `json:"auto_store_interval_max_sec"`
-	AutoStoreDurationSec             int    `json:"auto_store_duration_sec"`
-	AutoStoreTickSec                 int    `json:"auto_store_tick_sec"`
-	AutoStoreMaxPositionTries        int    `json:"auto_store_max_position_tries"`
-	AutoStoreFailCooldownSec         int    `json:"auto_store_fail_cooldown_sec"`
-	AutoGamePortStableSec            int    `json:"auto_game_port_stable_sec"`
-	AutoGamePortCheckTimeoutMS       int    `json:"auto_game_port_check_timeout_ms"`
-	SchedulerBadRecoverSec           int    `json:"scheduler_bad_recover_sec"`
-	SchedulerBadFailures             int    `json:"scheduler_bad_failures"`
-	SchedulerMetricsIntervalSec      int    `json:"scheduler_metrics_interval_sec"`
-	SchedulerStoreConcurrent         int    `json:"scheduler_store_concurrent"`
-	SchedulerOnlineBatchSize         int    `json:"scheduler_online_batch_size"`
-	SchedulerOnlineStartRate         int    `json:"scheduler_online_start_rate"`
-	SchedulerOnlineFillTimeout       int    `json:"scheduler_online_fill_timeout_sec"`
-	SchedulerBreakerAbnormalPct      int    `json:"scheduler_breaker_abnormal_percent"`
-	SchedulerBreakerPauseSec         int    `json:"scheduler_breaker_pause_sec"`
-	SchedulerBreakerReleaseBatch     int    `json:"scheduler_breaker_release_batch"`
-	SchedulerBreakerFloorPct         int    `json:"scheduler_breaker_floor_percent"`
-	SchedulerPortDownReleaseBatch    int    `json:"scheduler_port_down_release_batch"`
+	// AutoDungeonClear drives the run a party entry starts: the leader reports
+	// the room's actors dead, walks the maze and settles the run instead of
+	// standing in the entry room until the dwell timer leaves. It is opt-in
+	// separately from entry because it moves characters through the server's
+	// own maze topology, which is a property of each server's PVF.
+	AutoDungeonClear                bool `json:"auto_dungeon_clear"`
+	AutoChatReply                   bool `json:"auto_chat_reply"`
+	AutoTrade                       bool `json:"auto_trade"`
+	AutoSystemAnnouncement          bool `json:"auto_system_announcement"`
+	AutoServerNotice                bool `json:"auto_server_notice"`
+	ServerNoticeRobotIntervalMinSec int  `json:"server_notice_robot_interval_min_sec"`
+	ServerNoticeRobotIntervalMaxSec int  `json:"server_notice_robot_interval_max_sec"`
+	ServerNoticeMinGapSec           int  `json:"server_notice_min_gap_sec"`
+	ServerNoticeMaxGapSec           int  `json:"server_notice_max_gap_sec"`
+	ServerNoticeMaxPerHour          int  `json:"server_notice_max_per_hour"`
+	ServerNoticeLotteryPercent      int  `json:"server_notice_lottery_percent"`
+	ServerNoticeVillage             int  `json:"server_notice_village"`
+	ServerNoticeArea                int  `json:"server_notice_area"`
+	AutoTargetOnlineCount           int  `json:"auto_target_online_count"`
+	AutoMoveIntervalMinSec          int  `json:"auto_move_interval_min_sec"`
+	AutoMoveIntervalMaxSec          int  `json:"auto_move_interval_max_sec"`
+	AutoEmote                       bool `json:"auto_emote"`
+	AutoEmoteIntervalMinSec         int  `json:"auto_emote_interval_min_sec"`
+	AutoEmoteIntervalMaxSec         int  `json:"auto_emote_interval_max_sec"`
+	AutoEmoteIndexMin               int  `json:"auto_emote_index_min"`
+	AutoEmoteIndexMax               int  `json:"auto_emote_index_max"`
+	AutoShoutIntervalMinSec         int  `json:"auto_shout_interval_min_sec"`
+	AutoShoutIntervalMaxSec         int  `json:"auto_shout_interval_max_sec"`
+	AutoStoreProbabilityPercent     int  `json:"auto_store_probability_percent"`
+	AutoStoreIntervalMinSec         int  `json:"auto_store_interval_min_sec"`
+	AutoStoreIntervalMaxSec         int  `json:"auto_store_interval_max_sec"`
+	AutoStoreDurationSec            int  `json:"auto_store_duration_sec"`
+	AutoStoreTickSec                int  `json:"auto_store_tick_sec"`
+	AutoStoreMaxPositionTries       int  `json:"auto_store_max_position_tries"`
+	AutoStoreFailCooldownSec        int  `json:"auto_store_fail_cooldown_sec"`
+	AutoGamePortStableSec           int  `json:"auto_game_port_stable_sec"`
+	AutoGamePortCheckTimeoutMS      int  `json:"auto_game_port_check_timeout_ms"`
+	SchedulerBadRecoverSec          int  `json:"scheduler_bad_recover_sec"`
+	SchedulerBadFailures            int  `json:"scheduler_bad_failures"`
+	SchedulerMetricsIntervalSec     int  `json:"scheduler_metrics_interval_sec"`
+	SchedulerStoreConcurrent        int  `json:"scheduler_store_concurrent"`
+	SchedulerOnlineBatchSize        int  `json:"scheduler_online_batch_size"`
+	SchedulerOnlineStartRate        int  `json:"scheduler_online_start_rate"`
+	SchedulerOnlineFillTimeout      int  `json:"scheduler_online_fill_timeout_sec"`
+	SchedulerBreakerAbnormalPct     int  `json:"scheduler_breaker_abnormal_percent"`
+	SchedulerBreakerPauseSec        int  `json:"scheduler_breaker_pause_sec"`
+	SchedulerBreakerReleaseBatch    int  `json:"scheduler_breaker_release_batch"`
+	SchedulerBreakerFloorPct        int  `json:"scheduler_breaker_floor_percent"`
+	SchedulerPortDownReleaseBatch   int  `json:"scheduler_port_down_release_batch"`
 	// Online retry pacing. Every login attempt - the initial fill and each
 	// actor retry - draws from the scheduler's adaptive attempt budget, so the
 	// adaptive policy owns the retry rate instead of per-actor fixed delays.

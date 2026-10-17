@@ -31,9 +31,11 @@ type partyRunTransport struct {
 	runSelfStarted bool
 	runSince       time.Time
 	enterErr       error
+	clearErr       error
 
 	invites     []int
 	entered     []uint32
+	cleared     []int
 	leftRuns    []int
 	leftParties []int
 }
@@ -88,6 +90,11 @@ func (t *partyRunTransport) EnterDungeon(_ int, dungeonID uint32, _ byte) error 
 	return nil
 }
 
+func (t *partyRunTransport) ClearDungeon(uid int) error {
+	t.cleared = append(t.cleared, uid)
+	return t.clearErr
+}
+
 func (t *partyRunTransport) LeaveDungeon(uid int) error {
 	t.leftRuns = append(t.leftRuns, uid)
 	t.runActive = false
@@ -107,6 +114,11 @@ const partyRunConfig = "[auto]\nauto_party_dungeon = true\nauto_party_dungeon_si
 // 12, with the two neighbours the tests invite standing on the same map.
 func partyRunManager(t *testing.T, transport *partyRunTransport) *RobotRuntime {
 	t.Helper()
+	return partyRunManagerWithConfig(t, transport, partyRunConfig)
+}
+
+func partyRunManagerWithConfig(t *testing.T, transport *partyRunTransport, config string) *RobotRuntime {
+	t.Helper()
 	if transport.status == nil {
 		transport.status = map[int]robotcap.RuntimeStatus{
 			7: {UID: 7, CID: 700, StateName: robotcap.RuntimeStateRunning, Village: 3, Area: 12},
@@ -114,7 +126,7 @@ func partyRunManager(t *testing.T, transport *partyRunTransport) *RobotRuntime {
 			9: {UID: 9, CID: 900, StateName: robotcap.RuntimeStateRunning, Village: 3, Area: 12},
 		}
 	}
-	manager := testRobotManagerWithConfig(t, partyRunConfig)
+	manager := testRobotManagerWithConfig(t, config)
 	manager.SetBackendActionTransport(transport)
 	manager.runtimeState.snapshot = transport.status
 	manager.runtimeState.updatedAt = time.Now()
@@ -145,6 +157,65 @@ func TestAutoPartyDungeonEnterGathersTheMapAndCommitsOneRun(t *testing.T) {
 	// succeeded must not have ended either of them.
 	if len(transport.leftParties) != 0 || len(transport.leftRuns) != 0 {
 		t.Fatalf("formation ended the round itself: parties=%v runs=%v", transport.leftParties, transport.leftRuns)
+	}
+	// Clearing is its own switch, and this config leaves it off.
+	if len(transport.cleared) != 0 {
+		t.Fatalf("a switched-off clear ran: %v", transport.cleared)
+	}
+}
+
+// partyRunClearConfig is the party-run config with the clear switch on: the
+// run is entered and then walked to its boss.
+const partyRunClearConfig = partyRunConfig + "auto_dungeon_clear = true\n"
+
+func TestAutoPartyDungeonEnterClearsTheRunWhenAsked(t *testing.T) {
+	transport := &partyRunTransport{accept: 2, roster: []int{700}}
+	runtime := partyRunManagerWithConfig(t, transport, partyRunClearConfig)
+
+	result := runtime.AutoPartyDungeonEnter(7)
+	if !result.OK {
+		t.Fatalf("clearing party run refused: state=%s message=%s", result.State, result.Message)
+	}
+	if len(transport.cleared) != 1 || transport.cleared[0] != 7 {
+		t.Fatalf("clears = %v want one by the leader", transport.cleared)
+	}
+	if !strings.Contains(result.Message, "cleared") {
+		t.Fatalf("result message = %q want the clear in it", result.Message)
+	}
+	// The run belongs to the exit duty; the clear must not have ended it.
+	if len(transport.leftRuns) != 0 || len(transport.leftParties) != 0 {
+		t.Fatalf("clear ended the round itself: runs=%v parties=%v", transport.leftRuns, transport.leftParties)
+	}
+}
+
+func TestAutoPartyDungeonEnterReportsAClearThatCouldNotFinish(t *testing.T) {
+	transport := &partyRunTransport{accept: 2, roster: []int{700}, clearErr: errors.New("no boss room")}
+	runtime := partyRunManagerWithConfig(t, transport, partyRunClearConfig)
+
+	result := runtime.AutoPartyDungeonEnter(7)
+	if result.State != robotcap.ActionStateFailed {
+		t.Fatalf("result = %s/%s want a failure", result.State, result.Message)
+	}
+	if !strings.Contains(result.Message, "clear failed") {
+		t.Fatalf("result message = %q want the clear failure", result.Message)
+	}
+	// Entering succeeded, so the party is inside a live run the exit duty has to
+	// take out; the leader must not tear the party down here.
+	if len(transport.leftRuns) != 0 || len(transport.leftParties) != 0 {
+		t.Fatalf("a failed clear ended the round itself: runs=%v parties=%v", transport.leftRuns, transport.leftParties)
+	}
+}
+
+func TestAutoPartyDungeonEnterRefusesASecondRunOnTheSameCharacter(t *testing.T) {
+	transport := &partyRunTransport{accept: 2, roster: []int{700}, runActive: true}
+	runtime := partyRunManager(t, transport)
+
+	result := runtime.AutoPartyDungeonEnter(7)
+	if result.State != robotcap.ActionStateCancelled || result.Message != "already_in_dungeon" {
+		t.Fatalf("result = %s/%s want a cancelled already_in_dungeon", result.State, result.Message)
+	}
+	if len(transport.invites) != 0 || len(transport.entered) != 0 {
+		t.Fatalf("a robot inside a run formed another: invites=%v entered=%v", transport.invites, transport.entered)
 	}
 }
 
@@ -329,6 +400,33 @@ func TestAutoPartyDungeonExitStaysInARunAStrangerIsIn(t *testing.T) {
 	}
 	if len(transport.leftParties) != 0 {
 		t.Fatalf("a party holding a stranger was left: %v", transport.leftParties)
+	}
+}
+
+// TestAutoPartyDungeonExitLeavesARunItsPartyHasAlreadyLeft is the last member's
+// case, and it is the one the live fleet hit: the other members leave first, the
+// server dissolves the party, and this member's roster becomes a known empty one
+// while it is still inside the run. Nobody else is left to protect, so the exit
+// has to go through; treating the empty roster as a foreign party left the robot
+// inside the dungeon forever (live: char 3 never sent its op42 after the party
+// dissolved at 10:40:37).
+func TestAutoPartyDungeonExitLeavesARunItsPartyHasAlreadyLeft(t *testing.T) {
+	transport := &partyRunTransport{
+		runActive: true,
+		runSince:  time.Now().Add(-5 * time.Minute),
+		roster:    []int{},
+	}
+	runtime := partyRunManager(t, transport)
+
+	result := runtime.AutoPartyDungeonExit(7)
+	if !result.OK {
+		t.Fatalf("exit refused: state=%s message=%s", result.State, result.Message)
+	}
+	if len(transport.leftRuns) != 1 {
+		t.Fatalf("dungeon exits = %v want the last member to leave its own run", transport.leftRuns)
+	}
+	if len(transport.leftParties) != 0 {
+		t.Fatalf("party leaves = %v want none: there is no party left", transport.leftParties)
 	}
 }
 
