@@ -186,6 +186,19 @@ func TestRobotListLoadsTheWholeFleet(t *testing.T) {
 	}
 }
 
+// A capability list where every entry is enabled leaves the missing switch
+// undefined. The disabled branch must not read missing.reason then: the Auto
+// dialog failed with "Cannot read properties of undefined (reading 'reason')"
+// whenever all capabilities were already enabled, as in the packaged release.
+func TestAutoDialogHandlesFullyEnabledCapabilities(t *testing.T) {
+	if !strings.Contains(appJS, `missing?' disabled title="'+escapeHTML(missing.reason||i18nFormat('common.unavailable'))+'"':''`) {
+		t.Error("auto dialog must guard the missing switch before reading its reason")
+	}
+	if strings.Contains(appJS, `missing?'':' disabled title="'`) {
+		t.Error("auto dialog reads missing.reason when no capability is missing")
+	}
+}
+
 func TestBackendRecoveryAndExplicitApplyFlowRemainAvailable(t *testing.T) {
 	for _, want := range []string{"recovery_mode", "submitBackendSettings", "backendSettings", "backendCapabilities"} {
 		if !strings.Contains(appJS, want) {

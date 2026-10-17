@@ -103,6 +103,11 @@ func runMain() int {
 	if err != nil {
 		return runRecoveryWeb(cfg, backendSelection.BackendID, fmt.Sprintf("backend selection: %v", err))
 	}
+	if fillBackendSelectionSettings(cfg, backendInfo, &backendSelection) {
+		if err := saveBackendSelection(paths.BackendSelection(), &backendSelection); err != nil {
+			return runRecoveryWeb(cfg, backendSelection.BackendID, fmt.Sprintf("save backend settings: %v", err))
+		}
+	}
 	if err := applyBackendSelectionSettings(cfg, backendInfo, backendSelection); err != nil {
 		return runRecoveryWeb(cfg, backendSelection.BackendID, fmt.Sprintf("backend settings: %v", err))
 	}
@@ -147,6 +152,11 @@ func runMain() int {
 		backendInfo, err = backendregistry.Select(backendSelection.BackendID, runtime.GOOS)
 		if err != nil {
 			return runRecoveryWeb(cfg, backendSelection.BackendID, fmt.Sprintf("reload backend selection: %v", err))
+		}
+		if fillBackendSelectionSettings(cfg, backendInfo, &backendSelection) {
+			if err := saveBackendSelection(paths.BackendSelection(), &backendSelection); err != nil {
+				return runRecoveryWeb(cfg, backendSelection.BackendID, fmt.Sprintf("reload backend settings: %v", err))
+			}
 		}
 		if err := applyBackendSelectionSettings(cfg, backendInfo, backendSelection); err != nil {
 			return runRecoveryWeb(cfg, backendSelection.BackendID, fmt.Sprintf("reload backend settings: %v", err))

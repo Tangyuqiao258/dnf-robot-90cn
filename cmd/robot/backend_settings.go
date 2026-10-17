@@ -1,13 +1,88 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"robot/internal/foundation/atomicfile"
 	"robot/internal/foundation/config"
 	"robot/internal/shared"
 )
+
+// fillBackendSelectionSettings completes a persisted selection from the loaded
+// robot configuration. A packaged installation already ships a tuned
+// robot_config.ini, so the startup path must be able to derive the backend
+// settings from it instead of sending the operator through the recovery page.
+// Completing the selection keeps the configuration generation at zero, which
+// is what stops PrepareBackendRuntime from moving the shipped
+// robot_config.ini aside on the first start.
+func fillBackendSelectionSettings(cfg *config.SysConfig, info shared.BackendInfo, selection *shared.BackendSelection) bool {
+	if cfg == nil || selection == nil || len(info.Settings) == 0 {
+		return false
+	}
+	filled := false
+	for _, field := range info.Settings {
+		source := strings.TrimSpace(field.RuntimeSource)
+		if source == "" || strings.TrimSpace(selection.Settings[field.Key]) != "" {
+			continue
+		}
+		value := runtimeSourceValue(cfg, source)
+		if value == "" {
+			value = strings.TrimSpace(field.Default)
+		}
+		if value == "" {
+			continue
+		}
+		if selection.Settings == nil {
+			selection.Settings = make(map[string]string, len(info.Settings))
+		}
+		selection.Settings[field.Key] = value
+		filled = true
+	}
+	return filled
+}
+
+// runtimeSourceValue mirrors the webadmin dialog defaults
+// (internal/entry/webadmin/backend_selection.go runtimeSettingDefault) so the
+// startup path and the workbench derive identical settings from config.ini.
+func runtimeSourceValue(cfg *config.SysConfig, source string) string {
+	switch strings.TrimSpace(source) {
+	case "server_directory":
+		value := strings.TrimSpace(cfg.ServerDirectory)
+		if strings.EqualFold(filepath.Ext(value), ".pvf") {
+			return ""
+		}
+		if stat, err := os.Stat(value); err == nil && !stat.IsDir() {
+			return filepath.Dir(value)
+		}
+		return value
+	case "game_host":
+		return strings.TrimSpace(cfg.RobotConnectIP)
+	case "game_port":
+		if cfg.RobotGamePort > 0 {
+			return strconv.Itoa(cfg.RobotGamePort)
+		}
+	}
+	return ""
+}
+
+// saveBackendSelection persists a derived selection so the workbench reads the
+// same settings the startup path applied.
+func saveBackendSelection(path string, selection *shared.BackendSelection) error {
+	if selection.SelectedAt.IsZero() {
+		selection.SelectedAt = time.Now().UTC()
+	}
+	data, err := json.MarshalIndent(selection, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(path, append(data, '\n'), 0600)
+}
 
 // applyBackendSelectionSettings maps the adapter-declared settings onto the
 // process configuration using each field's runtime source. Adapter key names
