@@ -1,6 +1,7 @@
 package cn90
 
 import (
+	"strings"
 	"testing"
 
 	"robot/internal/shared"
@@ -31,8 +32,15 @@ func TestMetadataReflectsVerifiedCapabilities(t *testing.T) {
 	if mode := info.Capabilities[shared.CapabilityShout].Mode; mode != shared.ShoutModeDirected {
 		t.Fatalf("shout mode = %q want %q", mode, shared.ShoutModeDirected)
 	}
+	// Dungeon follow is enabled so the live pass can exercise it, but the
+	// packet-level acceptance is still pending. Keep that state explicit so a
+	// later edit cannot silently promote it to verified.
+	if status := info.Capabilities[shared.CapabilityDungeonFollow]; !status.Enabled ||
+		!strings.Contains(status.Reason, "live verification pending") {
+		t.Fatalf("dungeon_follow must be enabled pending live verification: %+v", status)
+	}
 	for _, capability := range []shared.BackendCapability{
-		shared.CapabilityDungeonFollow, shared.CapabilityGuildInvite,
+		shared.CapabilityGuildInvite,
 	} {
 		if info.Supports(capability) || info.Capabilities[capability].Reason == "" {
 			t.Fatalf("%s must remain disabled with reason: %+v", capability, info.Capabilities[capability])
